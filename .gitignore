@@ -1,0 +1,8 @@
+.ipynb_checkpoints/
+.vscode
+cache
+*.ipynb
+app/sample_data
+app/note
+
+
