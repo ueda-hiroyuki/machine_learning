@@ -2,7 +2,7 @@
 .vscode
 cache
 *.ipynb
-app/sample_data
-app/note
+app/src/sample_data
+app/src/note
 
 

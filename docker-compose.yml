@@ -3,8 +3,8 @@ version: "3"
 services:
   machine_learning:
     build: 
-      context: .
+      context: ./app
     volumes:
-      - ./app:/src/python_file
+      - ./app:/src/app
     ports:
       - "8000:8000"
