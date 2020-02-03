@@ -1,10 +1,10 @@
-FROM python:3 
+FROM python:3.6
 
-WORKDIR /src/app
-RUN mkdir aaa
-# RUN mkdir src
+COPY ./ /srv
+WORKDIR /srv
+
 # WORKDIR /src
 # COPY ./src /src
 # CMD chmod o+rw -R .
 # RUN pip install --upgrade pip
-# RUN pip install -r requirements.txt
+RUN pip install -r requirements.txt
