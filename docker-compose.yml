@@ -4,7 +4,7 @@ services:
   machine_learning:
     build: 
       context: ./app
-    # volumes:
-    #   - ./app:/src
+    volumes:
+      - ./app:/src
     ports:
       - "8000:8000"
