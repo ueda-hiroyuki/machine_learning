@@ -4,7 +4,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier as rfc
 from sklearn.metrics import accuracy_score, classification_report
 
-df = pd.read_csv("../sample_data/winequality-white.csv", sep=";", encoding="utf-8")
+df = pd.read_csv("../sample_data/sample/winequality-white.csv", sep=";", encoding="utf-8")
 
 x = df.drop("quality", axis=1) # データ
 y = df["quality"] # ラベル
