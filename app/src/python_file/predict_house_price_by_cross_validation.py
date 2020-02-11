@@ -1,6 +1,5 @@
 import pandas as pd
 import numpy as np
-import seaborn as sns
 import matplotlib.pyplot as plt
 from sklearn.linear_model import LinearRegression
 import lightgbm as lgb
@@ -95,12 +94,12 @@ def predict(model, test_data):
 
 
 def save_to_csv(df):
-    df.to_csv("../Kaggle/kaggle_dataset/house price/price_pred.csv")
+    df.to_csv("../sample_data/Kaggle/kaggle_dataset/house price/price_pred.csv")
     
 def main():
     train_x, train_y, non_kesson_test, test_id = preprocess(
-        "../Kaggle/kaggle_dataset/house price/train.csv", 
-        "../Kaggle/kaggle_dataset/house price/test.csv"
+        "../sample_data/Kaggle/kaggle_dataset/house price/train.csv", 
+        "../sample_data/Kaggle/kaggle_dataset/house price/test.csv"
     )
 
     skf = Kfold(5)
@@ -125,7 +124,7 @@ def main():
     pred_df = pd.concat([test_id, avg_pred], axis=1).rename(columns = {0 : 'SalePrice'}).set_index("Id")
     print(pred_df)
 
-    save_to_csv(pred_df)
+    # save_to_csv(pred_df)
     
 
 if __name__ == "__main__":
