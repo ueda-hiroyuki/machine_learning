@@ -77,25 +77,15 @@ def main():
     train_x_df, train_y_df = train_dataset_maker(train_df)
     test_x_df, id_df = test_dataset_maker(train)
 
-    y_preds = []
-    for train_idx, val_idx in StratifiedKFold(n_splits=5, shuffle=True, random_state=0).split(train_x_df, train_y_df):
-        tr_x = train_x_df.iloc[train_idx]
-        tr_y = train_y_df.iloc[train_idx]
-        val_x = train_x_df.iloc[val_idx]
-        val_y = train_y_df.iloc[val_idx]
-
-        train_data = lgb.Dataset(tr_x, tr_y)
-        val_data = lgb.Dataset(val_x, val_y, reference=train_data)
-        model = get_model(train_data, val_data)
-        
-        y_pred = predict(model, test_x_df)
-        y_preds.append(y_pred)
+    tr_x, val_x, tr_y, val_y = train_test_split(train_x_df, train_y_df, test_size=0.2)
     
-    preds_df = pd.DataFrame(y_preds).transpose()
-    pred_df = preds_df.mean(axis='columns')
-    submission_df = pd.concat([id_df, pred_df], axis=1).rename(columns={0:"item_cnt_month"})
-    print(submission_df)
-    save_to_csv(submission_df)
+    train = lgb.Dataset(tr_x, tr_y)
+    val = lgb.Dataset(val_x, val_y)
+
+    model = get_model(train, val)
+    y_pred = predict(model, test_x_df)
+    pred_df = pd.DataFrame(y_pred, columns=['item_cnt_month'])
+    pred_df.to_csv('../sample_data/Kaggle/kaggle_dataset/predict_future_price/price_pred.csv', index_label='ID')
 
 if __name__ == "__main__":
     # 2015年11月の売り上げを予測する。
