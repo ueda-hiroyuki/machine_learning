@@ -2,12 +2,14 @@ import pandas as pd
 import numpy as np
 import lightgbm as lgb
 import typing as t
+from scipy import stats
 import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split, KFold
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 
 TRAIN_PATH = 'src/sample_data/Kaggle/predict_target_of_bank/train.csv'
 TEST_PATH = 'src/sample_data/Kaggle/predict_target_of_bank/test.csv'
+SAVE_PATH = 'src/sample_data/Kaggle/predict_target_of_bank/submission.csv'
 
 MONTH = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
 JOB = ['blue-collar', 'management', 'technician', 'admin.', 'services', 'retired', 'self-employed', 'entrepreneur', 'housemaid', 'student', 'unemployed', 'unknown']
@@ -37,18 +39,20 @@ def read_csv(path: str) -> pd.DataFrame:
 
 
 def train_preprocess(df: pd.DataFrame) -> t.Tuple[pd.DataFrame, pd.DataFrame]:
-    train_x = df.drop('y', axis=1)
-    train_y = df.loc[:,'y']
-    train_x = replace_to_value(train_x) 
-
+    train_x = replace_to_value(df) 
     train_x = convert_type(train_x)
+    train_x = smoothing(train_x)
+    train_y = train_x.loc[:,'y']
+    train_x = train_x.drop('y', axis=1)
+    # train_x = standardize(train_x)
     return train_x, train_y
 
 
-def test_preprocess(df: pd.DataFrame) -> pd.DataFrame:
+def test_preprocess(df: pd.DataFrame) -> t.Tuple[pd.DataFrame, pd.Series]:
     test = replace_to_value(df)
     test = convert_type(test)
-    return test
+    ids = test['id']
+    return test, ids
 
 
 def replace_to_value(df: pd.DataFrame) -> None:
@@ -74,6 +78,20 @@ def convert_type(df: pd.DataFrame) -> pd.DataFrame:
     )
     return df
 
+def remove_outlier(column: pd.Series) -> pd.Series:
+    z = stats.zscore(column) < 5
+    sm_column = column[z]
+    return sm_column
+
+
+def smoothing(df: pd.DataFrame) -> pd.DataFrame:
+    print(df)
+    df = df.drop(df[(df['balance']>60000)].index)
+    df = df.drop(df[(df['duration']>3000)].index)
+    df = df.drop(df[(df['previous']>50)].index)
+    print(df)
+    return df
+
 
 def check_fig(df: pd.DataFrame) -> pd.DataFrame:
     for name, item in df.iteritems():
@@ -82,16 +100,23 @@ def check_fig(df: pd.DataFrame) -> pd.DataFrame:
         plt.savefig(f'src/sample_data/Kaggle/predict_target_of_bank/{name}.png')
 
 
+def standardize(df: pd.DataFrame) -> pd.DataFrame:
+    scaler = StandardScaler()
+    scaler.fit(df)
+    scaler_df = pd.DataFrame(scaler.transform(df), columns=df.columns)
+    return scaler_df
+
+
 def get_model(tr_dataset: t.Any, val_dataset: t.Any) -> t.Any:
     params = {
         "objective": "regression",
         "boosting_type": "gbdt",
         'metric' : {'l2'},
-        'num_leaves' : 5,
-        'min_data_in_leaf': 5,
-        'num_iterations' : 50,
-        'learning_rate' : 0.2,
-        'feature_fraction' : 0.5,
+        'num_leaves' : 20,
+        'min_data_in_leaf': 100,
+        'num_iterations' : 1000,
+        'learning_rate' : 0.5,
+        'feature_fraction' : 0.7,
     }
     model = lgb.train(
         params=params,
@@ -102,7 +127,9 @@ def get_model(tr_dataset: t.Any, val_dataset: t.Any) -> t.Any:
     return model
 
 
-def prediction()
+def prediction(model: t.Any, test_df: pd.DataFrame) -> pd.Series:
+    y_pred = model.predict(test_df, num_iteration=model.best_iteration)
+    return pd.Series(y_pred)
         
 
 def main(train_path: str, test_path: str) -> None:
@@ -110,14 +137,12 @@ def main(train_path: str, test_path: str) -> None:
     test = read_csv(test_path)
 
     train_x, train_y = train_preprocess(train)
-    test = test_preprocess(test)
-    train_x.apply(lambda x: print(x.value_counts(dropna=False)))
-    print(test.dtypes)
-    print(test)
+    test, ids = test_preprocess(test)
+    # check_fig(train_x)
 
     kf = KFold(n_splits=5, shuffle=True, random_state=0)
 
-    models = []
+    y_preds = []
     for tr_idx, val_idx in kf.split(train_x, train_y):
         tr_x = train_x.iloc[tr_idx]
         tr_y = train_y.iloc[tr_idx]
@@ -129,7 +154,17 @@ def main(train_path: str, test_path: str) -> None:
         val_dataset = lgb.Dataset(val_x, val_y, reference=tr_dataset)
         model = get_model(tr_dataset, val_dataset)
 
-        y_pred = prediction(model, test) 
+        y_pred = prediction(model, test)
+        y_preds.append(y_pred)
+
+    
+    preds_df = pd.concat(y_preds, axis=1)
+    print(preds_df)
+    print(ids)
+    pred_df = preds_df.mean(axis=1)
+    submission = pd.concat([ids, pred_df], axis=1)
+    print(submission)
+    submission.to_csv(SAVE_PATH, header=False, index=False)
 
 
 
