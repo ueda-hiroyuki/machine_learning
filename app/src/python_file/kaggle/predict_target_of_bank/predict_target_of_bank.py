@@ -6,6 +6,7 @@ from scipy import stats
 import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split, KFold
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
+from sklearn.metrics import mean_squared_error
 
 TRAIN_PATH = 'src/sample_data/Kaggle/predict_target_of_bank/train.csv'
 TEST_PATH = 'src/sample_data/Kaggle/predict_target_of_bank/test.csv'
@@ -43,8 +44,8 @@ def train_preprocess(df: pd.DataFrame) -> t.Tuple[pd.DataFrame, pd.DataFrame]:
     train_x = convert_type(train_x)
     train_x = smoothing(train_x)
     train_y = train_x.loc[:,'y']
-    train_x = train_x.drop('y', axis=1)
-    # train_x = standardize(train_x)
+    train_x = train_x.drop(['y','id', 'default', 'loan'], axis=1)
+    train_x = standardize(train_x)
     return train_x, train_y
 
 
@@ -52,6 +53,8 @@ def test_preprocess(df: pd.DataFrame) -> t.Tuple[pd.DataFrame, pd.Series]:
     test = replace_to_value(df)
     test = convert_type(test)
     ids = test['id']
+    test = test.drop(['id', 'default', 'loan'], axis=1)
+    test = standardize(test)
     return test, ids
 
 
@@ -107,11 +110,18 @@ def standardize(df: pd.DataFrame) -> pd.DataFrame:
     return scaler_df
 
 
+def minmaxscaler(df: pd.DataFrame) -> pd.DataFrame:
+    mm = MinMaxScaler()
+    mm.fit(df)
+    mm_df = pd.DataFrame(mm.transform(df), columns=df.columns)
+    return mm_df
+
+
 def get_model(tr_dataset: t.Any, val_dataset: t.Any) -> t.Any:
     params = {
         "objective": "regression",
         "boosting_type": "gbdt",
-        'metric' : {'l2'},
+        'metric' : 'rmse',
         'num_leaves' : 20,
         'min_data_in_leaf': 100,
         'num_iterations' : 1000,
@@ -143,6 +153,7 @@ def main(train_path: str, test_path: str) -> None:
     kf = KFold(n_splits=5, shuffle=True, random_state=0)
 
     y_preds = []
+    importances = []
     for tr_idx, val_idx in kf.split(train_x, train_y):
         tr_x = train_x.iloc[tr_idx]
         tr_y = train_y.iloc[tr_idx]
@@ -154,16 +165,20 @@ def main(train_path: str, test_path: str) -> None:
         val_dataset = lgb.Dataset(val_x, val_y, reference=tr_dataset)
         model = get_model(tr_dataset, val_dataset)
 
+        importance = pd.DataFrame(model.feature_importance(), index=train_x.columns, columns=["importance"])
+        importances.append(importance)
+
         y_pred = prediction(model, test)
         y_preds.append(y_pred)
 
     
     preds_df = pd.concat(y_preds, axis=1)
-    print(preds_df)
-    print(ids)
+    
     pred_df = preds_df.mean(axis=1)
     submission = pd.concat([ids, pred_df], axis=1)
     print(submission)
+    print("####################")
+    print(pd.concat(importances, axis=1))
     submission.to_csv(SAVE_PATH, header=False, index=False)
 
 
