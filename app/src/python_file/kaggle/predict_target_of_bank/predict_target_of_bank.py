@@ -3,6 +3,7 @@ import numpy as np
 import lightgbm as lgb
 import typing as t
 from scipy import stats
+import seaborn as sns
 import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split, KFold
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
@@ -45,7 +46,6 @@ def train_preprocess(df: pd.DataFrame) -> t.Tuple[pd.DataFrame, pd.DataFrame]:
     train_x = smoothing(train_x)
     train_y = train_x.loc[:,'y']
     train_x = train_x.drop(['y','id', 'default', 'loan'], axis=1)
-    train_x = standardize(train_x)
     return train_x, train_y
 
 
@@ -54,7 +54,6 @@ def test_preprocess(df: pd.DataFrame) -> t.Tuple[pd.DataFrame, pd.Series]:
     test = convert_type(test)
     ids = test['id']
     test = test.drop(['id', 'default', 'loan'], axis=1)
-    test = standardize(test)
     return test, ids
 
 
@@ -103,6 +102,13 @@ def check_fig(df: pd.DataFrame) -> pd.DataFrame:
         plt.savefig(f'src/sample_data/Kaggle/predict_target_of_bank/{name}.png')
 
 
+def check_corr(df: pd.DataFrame) -> None:
+    corr = df.corr()
+    plt.figure(figsize=(10,10))
+    sns.heatmap(corr, square=True, annot=True)
+    plt.savefig(f'src/sample_data/Kaggle/predict_target_of_bank/corr_heatmap.png')
+
+
 def standardize(df: pd.DataFrame) -> pd.DataFrame:
     scaler = StandardScaler()
     scaler.fit(df)
@@ -121,10 +127,10 @@ def get_model(tr_dataset: t.Any, val_dataset: t.Any) -> t.Any:
     params = {
         "objective": "regression",
         "boosting_type": "gbdt",
-        'metric' : 'rmse',
+        'metric' : {'l2'},
         'num_leaves' : 20,
         'min_data_in_leaf': 100,
-        'num_iterations' : 1000,
+        'num_iterations' : 2000,
         'learning_rate' : 0.5,
         'feature_fraction' : 0.7,
     }
@@ -149,6 +155,7 @@ def main(train_path: str, test_path: str) -> None:
     train_x, train_y = train_preprocess(train)
     test, ids = test_preprocess(test)
     # check_fig(train_x)
+    check_corr(train_x)
 
     kf = KFold(n_splits=5, shuffle=True, random_state=0)
 
