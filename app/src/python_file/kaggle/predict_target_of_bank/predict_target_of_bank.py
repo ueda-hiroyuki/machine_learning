@@ -157,7 +157,7 @@ def main(train_path: str, test_path: str) -> None:
     # check_fig(train_x)
     check_corr(train_x)
 
-    kf = KFold(n_splits=5, shuffle=True, random_state=0)
+    kf = KFold(n_splits=20, shuffle=True, random_state=0)
 
     y_preds = []
     importances = []

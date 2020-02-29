@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 import lightgbm as lgb
 import typing as t
+import seaborn as sns
 import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split, KFold
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
@@ -13,16 +14,20 @@ def change_to_float(df: pd.DataFrame) -> pd.DataFrame:
     df = df.drop('car name', axis=1).astype({'cylinders': float, 'horsepower': float, 'model year': float, 'origin': float})
     return df
 
-def process_train(path: str) -> t.Tuple[pd.DataFrame, pd.Series]:
+def process_train(path: str) -> t.Tuple[pd.DataFrame, pd.Series, pd.Series]:
     train = pd.read_table(path)
+    print(train['car name'].value_counts())
     name_df = train.loc[:,'car name']
     train = change_to_float(train)
-    return train, name_df
+    train_y = train.loc[:,'mpg']
+    train_x = train.drop(['mpg','cylinders'], axis=1)
+    return train_x, train_y, name_df
 
 def process_test(path: str) -> t.Tuple[pd.DataFrame, pd.Series]:
     test = pd.read_table(path)
     id_df = test.loc[:,'id']
     test = change_to_float(test)
+    test = test.drop('cylinders', axis=1)
     return test, id_df
 
 def standardize(df: pd.DataFrame) -> pd.DataFrame:
@@ -38,9 +43,18 @@ def minmaxscaler(df: pd.DataFrame) -> pd.DataFrame:
     return mm_df
 
 def check_fig(df: pd.DataFrame) -> pd.DataFrame:
-    plt.figure(figsize=(20,5))
-    df.plot()
-    plt.savefig('src/sample_data/Kaggle/predict_cars_mileage/feature_figure.png')
+    for name, item in df.iteritems():
+        plt.figure()
+        item.plot()
+        plt.savefig(f'src/sample_data/Kaggle/predict_cars_mileage/{name}.png')
+
+
+def check_corr(df: pd.DataFrame) -> None:
+    corr = df.corr()
+    plt.figure(figsize=(10,10))
+    sns.heatmap(corr, square=True, annot=True)
+    plt.savefig(f'src/sample_data/Kaggle/predict_cars_mileage/corr_heatmap.png')
+
 
 def get_model(tr_dataset: t.Any, val_dataset: t.Any) -> t.Any:
     params = {
@@ -57,18 +71,16 @@ def get_model(tr_dataset: t.Any, val_dataset: t.Any) -> t.Any:
         params=params,
         train_set=tr_dataset,
         valid_sets=val_dataset,
-        early_stopping_rounds=5,
+        early_stopping_rounds=10,
     )
     return model
 
 
 def main() -> None:    
-    train, name_df = process_train('src/sample_data/Kaggle/predict_cars_mileage/train.tsv')
+    train_x, train_y, name_df = process_train('src/sample_data/Kaggle/predict_cars_mileage/train.tsv')
     test, id_df = process_test('src/sample_data/Kaggle/predict_cars_mileage/test.tsv')
-    train_x = train.drop('mpg', axis=1)
-    train_y = train.loc[:,'mpg']
-    train_x = standardize(train_x)
-
+    
+    check_corr(train_x)
     check_fig(train_x)
 
     kf = KFold(n_splits=5, shuffle=True, random_state=0)
@@ -78,20 +90,22 @@ def main() -> None:
         tr_y = train_y.iloc[tr_idx]
         val_x = train_x.iloc[val_idx].reset_index(drop=True)
         val_y = train_y.iloc[val_idx].reset_index(drop=True)
-        print(tr_x, tr_y, val_x, val_y)
         tr_dataset = lgb.Dataset(tr_x, tr_y)
         val_dataset = lgb.Dataset(val_x, val_y, reference=tr_dataset)
         model = get_model(tr_dataset, val_dataset)
         models.append(model)
 
     y_preds = []
+    importances = []
     for model in models:
+        importance = pd.DataFrame(model.feature_importance(), index=train_x.columns, columns=["importance"])
+        importances.append(importance)
         y_pred = model.predict(test, num_iteration=model.best_iteration)
-        print(y_pred)
-        y_preds.append(y_pred)
-
-    pred_df = pd.DataFrame(y_preds).transpose().mean(axis='columns')
+        y_preds.append(pd.Series(y_pred))
+    preds_df = pd.concat(y_preds, axis=1)
+    pred_df = preds_df.mean(axis=1)
     submission_df = pd.concat([id_df, pred_df], axis=1)
+    print(pd.concat(importances, axis=1))
     print(submission_df)
     submission_df.to_csv('src/sample_data/Kaggle/predict_cars_mileage/submission.csv', header=False, index=False)
 
