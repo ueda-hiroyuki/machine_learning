@@ -57,7 +57,7 @@ def test_preprocess(df: pd.DataFrame) -> t.Tuple[pd.DataFrame, pd.Series]:
     return test, ids
 
 
-def replace_to_value(df: pd.DataFrame) -> None:
+def replace_to_value(df: pd.DataFrame) ->pd.DataFrame:
     for key, value in COLUMNS.items():
         for idx, row in enumerate(value):
             df[key] = df[key].mask(df[key] == row, idx)
