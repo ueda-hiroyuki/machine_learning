@@ -124,15 +124,26 @@ def minmaxscaler(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def get_model(tr_dataset: t.Any, val_dataset: t.Any) -> t.Any:
+    model = lgb.LGBMRegressor(
+        boosting_type='gbdt', 
+        num_leaves=30, 
+        learning_rate=0.3, 
+        n_estimators=100,
+    )
+    model.fit(
+        train_set=tr_dataset,
+        eval_set=val_dataset,
+        early_stopping_rounds=5,
+    )
     params = {
         "objective": "regression",
         "boosting_type": "gbdt",
         'metric' : {'l2'},
-        'num_leaves' : 50,
+        'num_leaves' : 20,
         'min_data_in_leaf': 100,
-        'num_iterations' : 100,
-        'learning_rate' : 0.2,
-        'feature_fraction' : 0.5,
+        'num_iterations' : 2000,
+        'learning_rate' : 0.5,
+        'feature_fraction' : 0.7,
     }
     model = lgb.train(
         params=params,
@@ -157,36 +168,53 @@ def main(train_path: str, test_path: str) -> None:
     # check_fig(train_x)
     check_corr(train_x)
 
-    kf = KFold(n_splits=10, shuffle=True, random_state=0)
-
+    kf = KFold(n_splits=5, shuffle=True, random_state=0)
     y_preds = []
-    importances = []
+    best_scores = []
     for tr_idx, val_idx in kf.split(train_x, train_y):
         tr_x = train_x.iloc[tr_idx]
         tr_y = train_y.iloc[tr_idx]
         val_x = train_x.iloc[val_idx]
         val_y = train_y.iloc[val_idx]
-        print(tr_x, tr_y, val_x, val_y)
 
-        tr_dataset = lgb.Dataset(tr_x, tr_y)
-        val_dataset = lgb.Dataset(val_x, val_y, reference=tr_dataset)
-        model = get_model(tr_dataset, val_dataset)
+        lgbr = lgb.LGBMRegressor(
+            boosting_type='gbdt',
+            objective='regression',
+            early_stopping_rounds=5,
+            eval_metric='l2',
+        )
+        params = {
+            'num_leaves' : [10, 20, 50, 100],
+            'min_data_in_leaf': [10, 100, 1000],
+            'num_iterations' : [10, 100, 1000, 2000],
+            'learning_rate' : [0.2, 0.5, 0.7],
+            'feature_fraction' : [0.5, 0,7],
+        }
+        clf = GridSearchCV(
+            estimator = lgbr, 
+            param_grid = params, 
+        )
+        clf.fit(
+            tr_x,
+            tr_y,
+            eval_set = [[val_x, val_y]]
+        )
+        best_score = clf.best_params_
+        best_scores.append(best_score)
+        
+        y_pred = clf.predict(test)
+        y_preds.append(pd.Series(y_pred))
+        
+    print("##############bast_score##############")
+    print(best_scores)
+    print("############################")  
 
-        importance = pd.DataFrame(model.feature_importance(), index=train_x.columns, columns=["importance"])
-        importances.append(importance)
-
-        y_pred = prediction(model, test)
-        y_preds.append(y_pred)
-
-    
     preds_df = pd.concat(y_preds, axis=1)
     
     pred_df = preds_df.mean(axis=1)
     submission = pd.concat([ids, pred_df], axis=1)
     print(submission)
-    print("####################")
-    print(pd.concat(importances, axis=1))
-    submission.to_csv(SAVE_PATH, header=False, index=False)
+    submission.to_csv(SAVE_PATH, header=False, index=False)  
 
 
 
