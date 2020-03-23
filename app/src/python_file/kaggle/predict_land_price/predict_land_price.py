@@ -4,6 +4,7 @@ import lightgbm as lgb
 import typing as t
 import seaborn as sns
 import matplotlib.pyplot as plt
+from scipy import stats
 from sklearn.model_selection import KFold
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 
@@ -11,6 +12,7 @@ from sklearn.preprocessing import StandardScaler, MinMaxScaler
 TEST_CSV = 'src/sample_data/Kaggle/kaggle_dataset/predict_land_price/test_data.csv'
 TRAIN_CSV = 'src/sample_data/Kaggle/kaggle_dataset/predict_land_price/train_data.csv'
 PRICE_CSV = 'src/sample_data/Kaggle/kaggle_dataset/predict_land_price/published_land_price.csv'
+SIGMA = 3
 
 
 def reduce_mem_usage(df, verbose=True):
@@ -43,17 +45,18 @@ def reduce_mem_usage(df, verbose=True):
     return df
 
 
-def preprocess_train(train: pd.DataFrame) -> t.Tuple[pd.DataFrame, pd.DataFrame]:
-    train = train.drop(["都道府県名","市区町村名"], axis=1)
+def preprocess_train(train: pd.DataFrame, sigma: float) -> t.Tuple[pd.DataFrame, pd.DataFrame]:
+    train = remove_extra_str(train.drop(["都道府県名","市区町村名"], axis=1)).dropna()
+    print(train)
     train_y = train.loc[:"y"]
     train_x = train.drop("y", axis=1)
     for column in train_x.columns:
         series = train_x[column]
-        uniques = list(series.value_counts().index)
-        print(type(uniques[0]))
-        if type(uniques[0]) == str:
-            for name in uniques:
-                print(name)
+        # uniques = list(series.value_counts().index)
+        # print(type(uniques[0]))
+        # if type(uniques[0]) == str:
+        #     for name in uniques:
+        #         print(name)
         
         
     return train_x, train_y
@@ -66,12 +69,28 @@ def preprocess_test(test: pd.DataFrame) -> t.Tuple[pd.DataFrame, pd.DataFrame]:
     return test, test
 
 
+def remove_outlier(df: pd.DataFrame, sigma: int) -> pd.DataFrame:
+    for column in df:
+        series = df[column]
+        z = stats.zscore(series) < sigma
+        df[column] = series[z]
+    return df       
+
+
+def remove_extra_str(df: pd.DataFrame) -> pd.DataFrame:
+    re = df.apply(lambda x: x.str.contains('以上|未満|?|戦前', na=False))
+    df = df.mask(re)
+    return df
+
+
 def main() -> None:
     train = reduce_mem_usage(pd.read_csv(TRAIN_CSV))
     test = reduce_mem_usage(pd.read_csv(TEST_CSV))
     price = reduce_mem_usage(pd.read_csv(PRICE_CSV))
 
-    train_x, train_y = preprocess_train(train)
+    train = train.head(100000)
+
+    train_x, train_y = preprocess_train(train, SIGMA)
 
 
 
