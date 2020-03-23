@@ -1,3 +1,4 @@
+import re
 import pandas as pd
 import numpy as np
 import lightgbm as lgb
@@ -6,7 +7,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 from scipy import stats
 from sklearn.model_selection import KFold
-from sklearn.preprocessing import StandardScaler, MinMaxScaler
+from sklearn.preprocessing import StandardScaler, MinMaxScaler, LabelEncoder
 
 
 TEST_CSV = 'src/sample_data/Kaggle/kaggle_dataset/predict_land_price/test_data.csv'
@@ -46,8 +47,7 @@ def reduce_mem_usage(df, verbose=True):
 
 
 def preprocess_train(train: pd.DataFrame, sigma: float) -> t.Tuple[pd.DataFrame, pd.DataFrame]:
-    train = remove_extra_str(train.drop(["都道府県名","市区町村名"], axis=1)).dropna()
-    print(train)
+    train = label_encorder(train.drop(["都道府県名","市区町村名"], axis=1).fillna(0))
     train_y = train.loc[:"y"]
     train_x = train.drop("y", axis=1)
     for column in train_x.columns:
@@ -77,9 +77,20 @@ def remove_outlier(df: pd.DataFrame, sigma: int) -> pd.DataFrame:
     return df       
 
 
-def remove_extra_str(df: pd.DataFrame) -> pd.DataFrame:
-    re = df.apply(lambda x: x.str.contains('以上|未満|?|戦前', na=False))
-    df = df.mask(re)
+def label_encorder(df: pd.DataFrame) -> pd.DataFrame:
+    print(df.isnull().sum())
+    print(df)
+
+    for column in df:
+        series = df[column]
+        print(list(series.value_counts()[0]))
+        uniques = list(series.value_counts().index)
+        if type(uniques[0]) == str:
+            le = LabelEncoder()
+            df[column] = le.fit_transform(series)
+        else:
+            pass
+    print(df)
     return df
 
 
@@ -88,7 +99,7 @@ def main() -> None:
     test = reduce_mem_usage(pd.read_csv(TEST_CSV))
     price = reduce_mem_usage(pd.read_csv(PRICE_CSV))
 
-    train = train.head(100000)
+    train = train.head(200000)
 
     train_x, train_y = preprocess_train(train, SIGMA)
 
