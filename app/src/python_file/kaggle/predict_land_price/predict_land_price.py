@@ -47,17 +47,9 @@ def reduce_mem_usage(df, verbose=True):
 
 
 def preprocess_train(train: pd.DataFrame, sigma: float) -> t.Tuple[pd.DataFrame, pd.DataFrame]:
-    train = label_encorder(train.drop(["都道府県名","市区町村名"], axis=1).fillna(0))
+    train = label_encorder(train.drop(["都道府県名","市区町村名"], axis=1))
     train_y = train.loc[:"y"]
-    train_x = train.drop("y", axis=1)
-    for column in train_x.columns:
-        series = train_x[column]
-        # uniques = list(series.value_counts().index)
-        # print(type(uniques[0]))
-        # if type(uniques[0]) == str:
-        #     for name in uniques:
-        #         print(name)
-        
+    train_x = train.drop("y", axis=1)       
         
     return train_x, train_y
 
@@ -78,12 +70,9 @@ def remove_outlier(df: pd.DataFrame, sigma: int) -> pd.DataFrame:
 
 
 def label_encorder(df: pd.DataFrame) -> pd.DataFrame:
-    print(df.isnull().sum())
-    print(df)
-
+    df = df.apply(lambda x: x.fillna(x.mode()[0])) # nanを最頻値で置き換え
     for column in df:
         series = df[column]
-        print(list(series.value_counts()[0]))
         uniques = list(series.value_counts().index)
         if type(uniques[0]) == str:
             le = LabelEncoder()
@@ -102,6 +91,7 @@ def main() -> None:
     train = train.head(200000)
 
     train_x, train_y = preprocess_train(train, SIGMA)
+    print(test.isnull().sum())
 
 
 
