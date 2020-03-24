@@ -50,14 +50,12 @@ def preprocess_train(train: pd.DataFrame, sigma: float) -> t.Tuple[pd.DataFrame,
     train = label_encorder(train.drop(["都道府県名","市区町村名"], axis=1))
     train_y = train.loc[:"y"]
     train_x = train.drop("y", axis=1)       
-        
     return train_x, train_y
 
 
 
 def preprocess_test(test: pd.DataFrame) -> t.Tuple[pd.DataFrame, pd.DataFrame]:
-    test = test.drop(["都道府県名","市区町村名"], axis=1)
-    
+    test = label_encorder(test.drop(["都道府県名","市区町村名"], axis=1))
     return test, test
 
 
@@ -79,7 +77,6 @@ def label_encorder(df: pd.DataFrame) -> pd.DataFrame:
             df[column] = le.fit_transform(series)
         else:
             pass
-    print(df)
     return df
 
 
@@ -91,7 +88,8 @@ def main() -> None:
     train = train.head(200000)
 
     train_x, train_y = preprocess_train(train, SIGMA)
-    print(test.isnull().sum())
+    test, test = preprocess_test(test)
+
 
 
 
