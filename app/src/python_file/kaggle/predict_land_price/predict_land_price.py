@@ -80,15 +80,44 @@ def label_encorder(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def check_corr(df: pd.DataFrame) -> None:
+    corr = df.corr()
+    plt.figure(figsize=(30,30))
+    sns.heatmap(corr, square=True, annot=True)
+    plt.savefig(f'src/sample_data/Kaggle/kaggle_dataset/predict_land_price/corr_heatmap.png')
+
+
 def main() -> None:
     train = reduce_mem_usage(pd.read_csv(TRAIN_CSV))
     test = reduce_mem_usage(pd.read_csv(TEST_CSV))
     price = reduce_mem_usage(pd.read_csv(PRICE_CSV))
 
-    train = train.head(200000)
+    _train = train.query("市区町村コード == 13118")
+    _price = price.query("所在地コード == 13118")
+    print(_train, _price)
 
-    train_x, train_y = preprocess_train(train, SIGMA)
-    test, test = preprocess_test(test)
+    # for i, row in _train.iterrows():
+    #     print(list(row))
+
+
+
+    
+
+ 
+    
+    print(train.isnull().sum())
+    # print(test.isnull().sum())
+    print(list(train.columns))
+    print(list(price.columns))
+    print(list(price.isnull().sum()))
+
+    print(train["市区町村コード"].value_counts())
+    print(price["住居表示"].value_counts())
+
+    # train_x, train_y = preprocess_train(train, SIGMA)
+    # test, test = preprocess_test(test)
+    
+
 
 
 
