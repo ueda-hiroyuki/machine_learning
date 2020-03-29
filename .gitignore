@@ -4,5 +4,5 @@ cache
 *.ipynb
 app/src/sample_data
 app/src/note
-
+*/**/__pycache__
 
