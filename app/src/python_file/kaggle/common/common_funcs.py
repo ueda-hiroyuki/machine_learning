@@ -6,6 +6,7 @@ import typing as t
 import seaborn as sns
 import matplotlib.pyplot as plt
 from scipy import stats
+from sklearn.preprocessing import LabelEncoder
 
 
 def reduce_mem_usage(df, verbose=True):
@@ -38,23 +39,31 @@ def reduce_mem_usage(df, verbose=True):
     return df
 
 
-    def check_corr(df: pd.DataFrame, f_name: str) -> None:
-        corr = df.corr()
-        plt.figure(figsize=(30,30))
-        sns.heatmap(corr, square=True, annot=True)
-        plt.savefig(f'src/sample_data/Kaggle/kaggle_dataset/{f_name}/corr_heatmap.png')
+def check_corr(df: pd.DataFrame, f_name: str) -> None:
+    corr = df.corr()
+    plt.figure(figsize=(30,30))
+    sns.heatmap(corr, square=True, annot=True)
+    plt.savefig(f'src/sample_data/Kaggle/kaggle_dataset/{f_name}/corr_heatmap.png')
 
 
-    def check_fig(df: pd.DataFrame, f_name: str) -> pd.DataFrame:
-        for name, item in df.iteritems():
-            plt.figure()
-            item.plot()
-            plt.savefig(f'src/sample_data/Kaggle/{f_name}/{name}.png')
+def check_fig(df: pd.DataFrame, f_name: str) -> pd.DataFrame:
+    for name, item in df.iteritems():
+        plt.figure()
+        item.plot()
+        plt.savefig(f'src/sample_data/Kaggle/{f_name}/{name}.png')
 
 
-    def remove_outlier(df: pd.DataFrame, sigma: int) -> pd.DataFrame:
-        for name in df:
-            series = df[name]
-            z = stats.zscore(series) < sigma
-            df[name] = column[z]
-        return df
+def label_encorder(df: pd.DataFrame, cols: t.Sequence[str]) -> pd.DataFrame:
+    for col in cols:
+        series = df[col]
+        le = LabelEncoder()
+        df[col] = le.fit_transform(series)
+    return df
+
+
+def remove_outlier(df: pd.DataFrame, sigma: int) -> pd.DataFrame:
+    for name in df:
+        series = df[name]
+        z = stats.zscore(series) < sigma
+        df[name] = column[z]
+    return df
