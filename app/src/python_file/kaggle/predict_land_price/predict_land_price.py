@@ -99,23 +99,22 @@ def main() -> None:
     # for i, row in _train.iterrows():
     #     print(list(row))
 
-
-
+    print(_price["緯度"],_price["経度"])
     
 
  
     
     print(train.isnull().sum())
-    # print(test.isnull().sum())
+    # # print(test.isnull().sum())
     print(list(train.columns))
     print(list(price.columns))
-    print(list(price.isnull().sum()))
+    # print(list(price.isnull().sum()))
 
-    print(train["市区町村コード"].value_counts())
-    print(price["住居表示"].value_counts())
+    # print(train["市区町村コード"].value_counts())
+    # print(price["住居表示"].value_counts())
 
-    # train_x, train_y = preprocess_train(train, SIGMA)
-    # test, test = preprocess_test(test)
+    # # train_x, train_y = preprocess_train(train, SIGMA)
+    # # test, test = preprocess_test(test)
     
 
 
