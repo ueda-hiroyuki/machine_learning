@@ -1,3 +1,4 @@
+import gc
 import pandas as pd
 import numpy as np
 import lightgbm as lgb
@@ -22,10 +23,20 @@ def extract_data(df: pd.DataFrame, days: int) -> pd.DataFrame:
     extracted_df = df.iloc[:, -days:-1]
     return extracted_df
 
-def train_preprocess(df: pd.DataFrame, cols: t.Sequence[str]) -> pd.DataFrame:
-    print(df)
-    train = cf.label_encorder(df, cols)
-    print(train)
+def train_preprocess(train: pd.DataFrame, calendar: pd.DataFrame, price: pd.DataFrame, cols: t.Sequence[str]) -> pd.DataFrame:
+    melted_train = pd.melt(
+        train, 
+        id_vars=cols,
+        var_name='day',
+        value_name='count'
+    )
+    print(melted_train.head(50))
+    print(calendar["d"].head(100), calendar.columns)
+    print(price, price.columns)
+    gc.collect()
+    merged_train = pd.merge(melted_train, calendar, how ='left', left_on =['day'], right_on=['d'])
+    print(merged_train.head(50))
+    return merged_train
 
 def melt(df: pd.DataFrame) -> pd.DataFrame:
     ...
@@ -45,23 +56,12 @@ def main(train_path: str, calendar_path: str, price_path: str, save_path: str) -
 
     meta = train.loc[:,train_meta]
     train = train.drop(train_meta, axis=1)
-    extract_train = extract_data(train, 300)
+    extract_train = extract_data(train, 200)
     print(train.head(50))
 
-    melted_train = pd.melt(
-        pd.concat([meta, extract_train], axis=1), 
-        id_vars=train_meta,
-        var_name='day',
-        value_name='count'
-    )
-    print(melted_train.head(50))
-    print(calendar["d"].head(100), calendar.columns)
-    print(price, price.columns)
+    train = pd.concat([meta, extract_train], axis=1)
+    train = train_preprocess(train, calendar, price, train_meta)
 
-    merged_train = pd.merge(melted_train, calendar, how ='left', left_on =['day'], right_on=['d'])
-    print(merged_train.head(50))
-
-    # train = train_preprocess(_train, train_meta)
 
     
 
