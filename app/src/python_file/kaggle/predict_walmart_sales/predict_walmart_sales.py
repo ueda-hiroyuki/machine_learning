@@ -23,7 +23,6 @@ def extract_data(df: pd.DataFrame, days: int) -> pd.DataFrame:
     return extracted_df
 
 def train_preprocess(df: pd.DataFrame, cols: t.Sequence[str]) -> pd.DataFrame:
-    cols = train_meta
     print(df)
     train = cf.label_encorder(df, cols)
     print(train)
@@ -56,8 +55,12 @@ def main(train_path: str, calendar_path: str, price_path: str, save_path: str) -
         value_name='count'
     )
     print(melted_train.head(50))
-    
-    # merged_train = pd.merge(train, price, how='left', on=['item_id', 'store_id'])
+    print(calendar["d"].head(100), calendar.columns)
+    print(price, price.columns)
+
+    merged_train = pd.merge(melted_train, calendar, how ='left', left_on =['day'], right_on=['d'])
+    print(merged_train.head(50))
+
     # train = train_preprocess(_train, train_meta)
 
     
