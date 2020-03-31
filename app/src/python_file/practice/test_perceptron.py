@@ -1,5 +1,5 @@
 import numpy as np
-
+import matplotlib.pyplot as plt
 
 def AND(x1, x2):
     x = np.array([x1, x2])
@@ -37,6 +37,15 @@ def XOR(x1, x2):
     return res
 
 
+def step_func(x):
+    y = x > 0
+    return y.astype(np.int)
+
+
+
 if __name__ == "__main__":
-    res = XOR(1,0)    
-    print(res)
+    x = np.arange(-5,5, 0.1)
+    y = step_func(x)  
+    print(y)
+    plt.plot(x,y)
+    plt.savefig("src/sample_data/step.png")  
