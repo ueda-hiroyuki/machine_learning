@@ -1,21 +1,23 @@
 import tensorflow as tf
 
+w = tf.Variable(tf.ones(shape=(2,2)), name="w")
+b = tf.Variable(tf.zeros(shape=(2)), name="b")
 
-def say_hello():
-    hello = tf.constant('hello') # 定数の定義
-    res = sess.run(hello)
-    print(res) 
+@tf.function
+def culc1(x): 
+    print(w, x, b) 
+    result = w * x + b
+    return result
 
-def culc():
-    a = tf.constant(100, name='100') # 定数の定義
-    b = tf.constant(50, name='50')
-    c = tf.constant(3, name='3')
-    add = tf.add(a,b, name="add") # 演算の定義
-    mul = tf.multiply(add, c, name="mul")
-    res = sess.run(mul) # 定義した演算を呼び出して評価する
-    print(res)
-    tf.summary.FileWriter("../sample_data/logs", sess.graph)
+@tf.function
+def culc2():
+    a = 100 # 定数の定義
+    b = 4
+    c = 3
+    add = a + b # 演算の定義
+    mul = add * c
+    return mul
 
 if __name__ == "__main__":
-    sess = tf.Session() # セッションの開始
-    culc()
+    result = culc2()
+    print(result)
