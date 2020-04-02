@@ -4,6 +4,7 @@ import numpy as np
 import lightgbm as lgb
 import typing as t
 import seaborn as sns
+import dask.dataframe as dd
 import matplotlib.pyplot as plt
 from scipy import stats
 from sklearn.model_selection import train_test_split, KFold, GridSearchCV, RandomizedSearchCV
@@ -24,27 +25,29 @@ def extract_data(df: pd.DataFrame, days: int) -> pd.DataFrame:
     return extracted_df
 
 def train_preprocess(train: pd.DataFrame, calendar: pd.DataFrame, price: pd.DataFrame, cols: t.Sequence[str]) -> pd.DataFrame:
-    melted_train = pd.melt(
+    melted_train = dd.melt(
         train, 
         id_vars=cols,
         var_name='day',
         value_name='count'
     )
-    print(melted_train.head(50))
-    print(calendar["d"].head(100), calendar.columns)
-    print(price, price.columns)
-    gc.collect()
-    merged_train = pd.merge(melted_train, calendar, how ='left', left_on =['day'], right_on=['d'])
-    print(merged_train.head(50))
-    return merged_train
+    print(melted_train.columns)
+    # print(melted_train.compute().head(50))
+    # print(calendar["d"].head(100), calendar.columns)
+    # print(price, price.columns)
+    merged_train = dd.merge(melted_train, calendar, left_on='day', right_on='d')
+    print(merged_train.columns)
+    print(merged_train.compute()["day"],merged_train.compute()["d"])
+    # print(merged_train.head(50))
+    # return merged_train
 
 def melt(df: pd.DataFrame) -> pd.DataFrame:
     ...
 
 def main(train_path: str, calendar_path: str, price_path: str, save_path: str) -> None:
-    train = pd.read_csv(train_path)
-    calendar = pd.read_csv(calendar_path)
-    price = pd.read_csv(price_path)
+    train = dd.read_csv(train_path)
+    calendar = dd.read_csv(calendar_path)
+    price = dd.read_csv(price_path)
 
     # _train = train.head(20)
     # _calendar = calendar.head(20)
@@ -56,10 +59,11 @@ def main(train_path: str, calendar_path: str, price_path: str, save_path: str) -
 
     meta = train.loc[:,train_meta]
     train = train.drop(train_meta, axis=1)
-    extract_train = extract_data(train, 200)
-    print(train.head(50))
+    extract_train = extract_data(train, 10)
+    print(type(extract_train))
+    print(type(meta))
 
-    train = pd.concat([meta, extract_train], axis=1)
+    train = dd.merge(meta, extract_train)
     train = train_preprocess(train, calendar, price, train_meta)
 
 
