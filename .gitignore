@@ -1,1 +1,6 @@
-.*
+.ipynb_checkpoints/
+.vscode
+cache
+*.ipynb
+app/src/sample_data
+app/src/note
