@@ -25,7 +25,7 @@ def extract_data(
     df: pd.DataFrame, 
     days: int
 ) -> pd.DataFrame:
-    extracted_df = df.iloc[:, -days:-1]
+    extracted_df = df.iloc[:, -days:]
     return extracted_df
 
 def train_preprocess(
@@ -54,20 +54,40 @@ def train_preprocess(
         how="left",
         on=["store_id", "item_id", "wm_yr_wk"]
     ).fillna("0")
-    print(merged_train.columns) 
-    print("###################previous##################")
-    print(merged_train)
-    print(merged_train["day"])
-    merged_train = cf.label_encorder(merged_train, [*cols, *add_cols]).drop(["date", "weekday"], axis=1)
-    print("###################new##################")
-    print(merged_train)
-    print(merged_train["day"])
+    # print(merged_train.columns) 
+    # print(merged_train.head(50))
+    merged_train["use"] = "train"
 
     return merged_train
 
 
-def format_preprocess(submission_df: pd.DataFrame) -> pd.DataFrame:
-    print(submission_df)
+def test_preprocess(submission_df: pd.DataFrame, meta_df: pd.DataFrame, meta_cols: t.Sequence[str]) -> t.Tuple[pd.DataFrame, pd.DataFrame]:
+    validation = submission_df[submission_df['id'].str.contains('validation')] 
+    evaluation = submission_df[submission_df['id'].str.contains('evaluation')]
+    validation.columns = ["id"] + [f'd_{num}' for num in range(1914,1942)]
+    evaluation.columns = ["id"] + [f'd_{num}' for num in range(1914,1942)]
+    evaluation['id'] = evaluation['id'].str.replace('evaluation','validation')
+    validation = pd.merge(validation, meta_df, how="left", on="id")
+    evaluation = pd.merge(evaluation, meta_df, how="left", on="id")
+    melted_validation = pd.melt(
+        validation,
+        id_vars=meta_cols, 
+        var_name='day',
+        value_name='count'
+    )
+    melted_evaluation = pd.melt(
+        evaluation,
+        id_vars=meta_cols, 
+        var_name='day',
+        value_name='count'
+    )
+    melted_validation["use"] = "test1"
+    melted_evaluation["use"] = "test2"
+
+    return melted_validation, melted_evaluation
+    
+
+
 
 
 def main(train_path: str, calendar_path: str, price_path: str, sample_submission_path: str, save_dir: str) -> None:
@@ -76,21 +96,14 @@ def main(train_path: str, calendar_path: str, price_path: str, sample_submission
     price = pd.read_csv(price_path)
     sample_submission = pd.read_csv(sample_submission_path) 
 
-    # _train = train.head(20)
-    # _calendar = calendar.head(20)
-    # _price = price.head(20)
-
-    # print(_train)
-    # print(_calendar)
-    # print(_price)
-    # print(sample_submission)
-
     meta = train.loc[:,TRAIN_META]
-    # train = train.drop(TRAIN_META, axis=1)
-    # train = pd.concat([meta, extract_data(train, 100)], axis=1)
-    # train = train_preprocess(train, calendar, price, TRAIN_META, ADD_COLS)
+    train = train.drop(TRAIN_META, axis=1)
+    train = pd.concat([meta, extract_data(train, 10)], axis=1)
+    train = train_preprocess(train, calendar, price, TRAIN_META, ADD_COLS)
 
-    submission = format_preprocess(sample_submission)
+    test1, test2 = test_preprocess(sample_submission, meta, TRAIN_META)
+
+    print(train.head(30), test1.head(30), test2.head(30))
 
 
     
