@@ -15,39 +15,66 @@ from kaggle.common import common_funcs as cf
 TRAIN_PATH = 'src/sample_data/Kaggle/kaggle_dataset/predict_walmart_sales/sales_train_validation.csv'
 CALENDAR_PATH = 'src/sample_data/Kaggle/kaggle_dataset/predict_walmart_sales/calendar.csv'
 PRICE_PATH = 'src/sample_data/Kaggle/kaggle_dataset/predict_walmart_sales/sell_prices.csv'
-SAVE_PATH = 'src/sample_data/Kaggle/kaggle_dataset/predict_walmart_sales/submission.csv'
+SAMPLE_SUBMISSION_PATH = 'src/sample_data/Kaggle/kaggle_dataset/predict_walmart_sales/sample_submission.csv'
+SAVE_DIR = 'src/sample_data/Kaggle/kaggle_dataset/predict_walmart_sales'
 
-train_meta = ['id', 'item_id', 'dept_id', 'cat_id', 'store_id', 'state_id']
+TRAIN_META = ['id', 'item_id', 'dept_id', 'cat_id', 'store_id', 'state_id']
+ADD_COLS = ["day", "date", "weekday", "event_name_1", "event_type_1", "event_name_2", "event_type_2"] 
 
-def extract_data(df: pd.DataFrame, days: int) -> pd.DataFrame:
-    print(df)
+def extract_data(
+    df: pd.DataFrame, 
+    days: int
+) -> pd.DataFrame:
     extracted_df = df.iloc[:, -days:-1]
     return extracted_df
 
-def train_preprocess(train: pd.DataFrame, calendar: pd.DataFrame, price: pd.DataFrame, cols: t.Sequence[str]) -> pd.DataFrame:
-    melted_train = dd.melt(
+def train_preprocess(
+    train: pd.DataFrame, 
+    calendar: pd.DataFrame, 
+    price: pd.DataFrame, 
+    cols: t.Sequence[str], 
+    add_cols: t.Sequence[str]
+) -> pd.DataFrame:
+    melted_train = pd.melt(
         train, 
         id_vars=cols,
         var_name='day',
         value_name='count'
     )
-    print(melted_train.columns)
-    # print(melted_train.compute().head(50))
-    # print(calendar["d"].head(100), calendar.columns)
-    # print(price, price.columns)
-    merged_train = dd.merge(melted_train, calendar, left_on='day', right_on='d')
-    print(merged_train.columns)
-    print(merged_train.compute()["day"],merged_train.compute()["d"])
-    # print(merged_train.head(50))
-    # return merged_train
+    merged_train = pd.merge(
+        melted_train, 
+        calendar, 
+        how="left", 
+        left_on='day', 
+        right_on='d'
+    ).drop("d", axis=1)
+    merged_train = pd.merge(
+        merged_train, 
+        price, 
+        how="left",
+        on=["store_id", "item_id", "wm_yr_wk"]
+    ).fillna("0")
+    print(merged_train.columns) 
+    print("###################previous##################")
+    print(merged_train)
+    print(merged_train["day"])
+    merged_train = cf.label_encorder(merged_train, [*cols, *add_cols]).drop(["date", "weekday"], axis=1)
+    print("###################new##################")
+    print(merged_train)
+    print(merged_train["day"])
 
-def melt(df: pd.DataFrame) -> pd.DataFrame:
-    ...
+    return merged_train
 
-def main(train_path: str, calendar_path: str, price_path: str, save_path: str) -> None:
-    train = dd.read_csv(train_path)
-    calendar = dd.read_csv(calendar_path)
-    price = dd.read_csv(price_path)
+
+def format_preprocess(submission_df: pd.DataFrame) -> pd.DataFrame:
+    print(submission_df)
+
+
+def main(train_path: str, calendar_path: str, price_path: str, sample_submission_path: str, save_dir: str) -> None:
+    train = pd.read_csv(train_path)
+    calendar = pd.read_csv(calendar_path)
+    price = pd.read_csv(price_path)
+    sample_submission = pd.read_csv(sample_submission_path) 
 
     # _train = train.head(20)
     # _calendar = calendar.head(20)
@@ -56,19 +83,18 @@ def main(train_path: str, calendar_path: str, price_path: str, save_path: str) -
     # print(_train)
     # print(_calendar)
     # print(_price)
+    # print(sample_submission)
 
-    meta = train.loc[:,train_meta]
-    train = train.drop(train_meta, axis=1)
-    extract_train = extract_data(train, 10)
-    print(type(extract_train))
-    print(type(meta))
+    meta = train.loc[:,TRAIN_META]
+    # train = train.drop(TRAIN_META, axis=1)
+    # train = pd.concat([meta, extract_data(train, 100)], axis=1)
+    # train = train_preprocess(train, calendar, price, TRAIN_META, ADD_COLS)
 
-    train = dd.merge(meta, extract_train)
-    train = train_preprocess(train, calendar, price, train_meta)
+    submission = format_preprocess(sample_submission)
 
 
     
 
 
 if __name__ == "__main__":
-    main(TRAIN_PATH, CALENDAR_PATH, PRICE_PATH, SAVE_PATH)
+    main(TRAIN_PATH, CALENDAR_PATH, PRICE_PATH, SAMPLE_SUBMISSION_PATH, SAVE_DIR)

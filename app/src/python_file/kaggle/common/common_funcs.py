@@ -50,7 +50,7 @@ def check_fig(df: pd.DataFrame, f_name: str) -> pd.DataFrame:
     for name, item in df.iteritems():
         plt.figure()
         item.plot()
-        plt.savefig(f'src/sample_data/Kaggle/{f_name}/{name}.png')
+        plt.savefig(f'src/sample_data/Kaggle/kaggle_dataset/{f_name}/{name}.png')
 
 
 def label_encorder(df: pd.DataFrame, cols: t.Sequence[str]) -> pd.DataFrame:
