@@ -86,18 +86,19 @@ def merge_data(dataset: pd.DataFrame, calendar: pd.DataFrame, price: pd.DataFram
     
 
 def add_trend(dataset: pd.DataFrame) -> pd.DataFrame:
-    lags = [7,30]
-    dfs = []
+    lags = [7, 30]
+    window_sizes = [7, 30]
     print(dataset)
-    for id in dataset["id"].unique():
-        _df = dataset[dataset['id'] == id]
-        for l in lags:
-            _df[f'lag_{l}'] = _df["count"].shift(l)
-            dfs.append(_df)
-    dataset = pd.concat(dfs, axis=0)
-    print(dataset["lag_7"])
-    print(dataset["lag_30"])
+    lag_cols = [f"lag_{lag}" for lag in lags ]
+    for lag, lag_col in zip(lags, lag_cols):
+        dataset[lag_col] = dataset[["id","count"]].groupby("id")["count"].shift(lag)
 
+    for window_size in window_sizes :
+        for lag,lag_col in zip(lags, lag_cols):
+            dataset[f"rmean_{lag}_{window_size}"] = dataset[["id", lag_col]].groupby("id")[lag_col].transform(lambda x : x.rolling(window_size).mean())
+        
+    print(dataset.isna().sum())
+    return dataset.dropna()
 
 
 def main(train_path: str, calendar_path: str, price_path: str, sample_submission_path: str, save_dir: str) -> None:
@@ -108,23 +109,14 @@ def main(train_path: str, calendar_path: str, price_path: str, sample_submission
 
     meta = train.loc[:,TRAIN_META]
     train = train.drop(TRAIN_META, axis=1)
-    train = pd.concat([meta, extract_data(train, 2)], axis=1)
+    train = pd.concat([meta, extract_data(train, 1000)], axis=1)
     train = train_preprocess(train, TRAIN_META)
 
     test1, test2 = test_preprocess(sample_submission, meta, TRAIN_META)
     dataset = pd.concat([train, test1, test2], axis=0).reset_index(drop=True)
     dataset = merge_data(dataset, calendar, price)
     dataset = add_trend(dataset)
-
-
-
-    
-
-
-
-
-
-
+    print(dataset)
     
 
 
