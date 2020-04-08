@@ -30,35 +30,16 @@ def extract_data(
 
 def train_preprocess(
     train: pd.DataFrame, 
-    calendar: pd.DataFrame, 
-    price: pd.DataFrame, 
     cols: t.Sequence[str], 
-    add_cols: t.Sequence[str]
 ) -> pd.DataFrame:
-    melted_train = pd.melt(
+    train = pd.melt(
         train, 
         id_vars=cols,
         var_name='day',
         value_name='count'
     )
-    merged_train = pd.merge(
-        melted_train, 
-        calendar, 
-        how="left", 
-        left_on='day', 
-        right_on='d'
-    ).drop("d", axis=1)
-    merged_train = pd.merge(
-        merged_train, 
-        price, 
-        how="left",
-        on=["store_id", "item_id", "wm_yr_wk"]
-    ).fillna("0")
-    # print(merged_train.columns) 
-    # print(merged_train.head(50))
-    merged_train["use"] = "train"
-
-    return merged_train
+    train["use"] = "train"
+    return train
 
 
 def test_preprocess(submission_df: pd.DataFrame, meta_df: pd.DataFrame, meta_cols: t.Sequence[str]) -> t.Tuple[pd.DataFrame, pd.DataFrame]:
@@ -85,8 +66,37 @@ def test_preprocess(submission_df: pd.DataFrame, meta_df: pd.DataFrame, meta_col
     melted_evaluation["use"] = "test2"
 
     return melted_validation, melted_evaluation
+
+
+def merge_data(dataset: pd.DataFrame, calendar: pd.DataFrame, price: pd.DataFrame) -> pd.DataFrame:
+    merged_dataset = pd.merge(
+        dataset, 
+        calendar, 
+        how="left", 
+        left_on='day', 
+        right_on='d'
+    ).drop("d", axis=1)
+    merged_dataset = pd.merge(
+        merged_dataset, 
+        price, 
+        how="left",
+        on=["store_id", "item_id", "wm_yr_wk"]
+    ).fillna("0")
+    return merged_dataset
     
 
+def add_trend(dataset: pd.DataFrame) -> pd.DataFrame:
+    lags = [7,30]
+    dfs = []
+    print(dataset)
+    for id in dataset["id"].unique():
+        _df = dataset[dataset['id'] == id]
+        for l in lags:
+            _df[f'lag_{l}'] = _df["count"].shift(l)
+            dfs.append(_df)
+    dataset = pd.concat(dfs, axis=0)
+    print(dataset["lag_7"])
+    print(dataset["lag_30"])
 
 
 
@@ -98,12 +108,21 @@ def main(train_path: str, calendar_path: str, price_path: str, sample_submission
 
     meta = train.loc[:,TRAIN_META]
     train = train.drop(TRAIN_META, axis=1)
-    train = pd.concat([meta, extract_data(train, 10)], axis=1)
-    train = train_preprocess(train, calendar, price, TRAIN_META, ADD_COLS)
+    train = pd.concat([meta, extract_data(train, 2)], axis=1)
+    train = train_preprocess(train, TRAIN_META)
 
     test1, test2 = test_preprocess(sample_submission, meta, TRAIN_META)
+    dataset = pd.concat([train, test1, test2], axis=0).reset_index(drop=True)
+    dataset = merge_data(dataset, calendar, price)
+    dataset = add_trend(dataset)
 
-    print(train.head(30), test1.head(30), test2.head(30))
+
+
+    
+
+
+
+
 
 
     
