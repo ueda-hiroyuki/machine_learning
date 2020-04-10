@@ -20,6 +20,7 @@ SAVE_DIR = 'src/sample_data/Kaggle/kaggle_dataset/predict_walmart_sales'
 
 TRAIN_META = ['id', 'item_id', 'dept_id', 'cat_id', 'store_id', 'state_id']
 ADD_COLS = ["day", "date", "weekday", "event_name_1", "event_type_1", "event_name_2", "event_type_2"] 
+USELESS_COLS = ["id", "date", "count","day", "wm_yr_wk", "weekday", "date", "use"]
 
 def extract_data(
     df: pd.DataFrame, 
@@ -42,9 +43,10 @@ def train_preprocess(
     return train
 
 
-def test_preprocess(submission_df: pd.DataFrame, meta_df: pd.DataFrame, meta_cols: t.Sequence[str]) -> t.Tuple[pd.DataFrame, pd.DataFrame]:
+def test_preprocess(submission_df: pd.DataFrame, meta_df: pd.DataFrame, meta_cols: t.Sequence[str]) -> t.Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     validation = submission_df[submission_df['id'].str.contains('validation')] 
     evaluation = submission_df[submission_df['id'].str.contains('evaluation')]
+    test_id_df = validation.loc[:,"id"]
     validation.columns = ["id"] + [f'd_{num}' for num in range(1914,1942)]
     evaluation.columns = ["id"] + [f'd_{num}' for num in range(1914,1942)]
     evaluation['id'] = evaluation['id'].str.replace('evaluation','validation')
@@ -65,7 +67,7 @@ def test_preprocess(submission_df: pd.DataFrame, meta_df: pd.DataFrame, meta_col
     melted_validation["use"] = "test1"
     melted_evaluation["use"] = "test2"
 
-    return melted_validation, melted_evaluation
+    return melted_validation, melted_evaluation, test_id_df
 
 
 def merge_data(dataset: pd.DataFrame, calendar: pd.DataFrame, price: pd.DataFrame) -> pd.DataFrame:
@@ -81,7 +83,7 @@ def merge_data(dataset: pd.DataFrame, calendar: pd.DataFrame, price: pd.DataFram
         price, 
         how="left",
         on=["store_id", "item_id", "wm_yr_wk"]
-    ).fillna("0")
+    ).fillna("0").astype({'sell_price': float})
     return merged_dataset
     
 
@@ -134,7 +136,7 @@ def main(train_path: str, calendar_path: str, price_path: str, sample_submission
     train = pd.concat([meta, extract_data(train,100)], axis=1)
     train = train_preprocess(train, TRAIN_META)
 
-    test1, test2 = test_preprocess(sample_submission, meta, TRAIN_META)
+    test1, test2, test_id_df = test_preprocess(sample_submission, meta, TRAIN_META)
     dataset = pd.concat([train, test1, test2], axis=0).reset_index(drop=True)
     dataset = merge_data(dataset, calendar, price)
     dataset = add_trend(dataset)
@@ -145,11 +147,11 @@ def main(train_path: str, calendar_path: str, price_path: str, sample_submission
     train = dataset[dataset["use"] == "train"]
     valid = dataset[dataset["use"] == "test1"]
     test = dataset[dataset["use"] == "test2"]
-    train_x = train.drop(["count", "use"], axis=1)
+    train_x = train.drop(USELESS_COLS, axis=1)
     train_y = train.loc[:,"count"]
-    valid_x = valid.drop(["count", "use"], axis=1)
+    valid_x = valid.drop(USELESS_COLS, axis=1)
     valid_y = valid.loc[:,"count"]
-    test_x = test.drop(["count", "use"], axis=1)
+    test_x = test.drop(USELESS_COLS, axis=1)
 
     print(train_x)
 
@@ -161,6 +163,9 @@ def main(train_path: str, calendar_path: str, price_path: str, sample_submission
     y_pred = predict_label(model, test_x)
 
     print(y_pred)    
+    sub_cols = [f"F{idx}" for idx in range(1,29)]
+    pred_df = pd.DataFrame(y_pred.values.reshape(28,len(y_pred)/28), columns=sub_cols)
+    print(pred_df)
 
 
 
