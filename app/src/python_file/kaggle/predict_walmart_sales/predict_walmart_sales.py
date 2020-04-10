@@ -133,7 +133,7 @@ def main(train_path: str, calendar_path: str, price_path: str, sample_submission
 
     meta = train.loc[:,TRAIN_META]
     train = train.drop(TRAIN_META, axis=1)
-    train = pd.concat([meta, extract_data(train,100)], axis=1)
+    train = pd.concat([meta, extract_data(train,730)], axis=1)
     train = train_preprocess(train, TRAIN_META)
 
     test1, test2, test_id_df = test_preprocess(sample_submission, meta, TRAIN_META)
@@ -164,10 +164,16 @@ def main(train_path: str, calendar_path: str, price_path: str, sample_submission
 
     print(y_pred)    
     sub_cols = [f"F{idx}" for idx in range(1,29)]
-    pred_df = pd.DataFrame(y_pred.values.reshape(28,len(y_pred)/28), columns=sub_cols)
+    pred_df = pd.DataFrame(y_pred.to_numpy(dtype=float).reshape(int(len(y_pred)/28), 28), columns=sub_cols)
     print(pred_df)
+    validation_ids = test_id_df
+    evaluation_ids = test_id_df.str.replace('validation','evaluation')
 
-
+    val_pred = pd.concat([test_id_df, pred_df], axis=1)
+    eval_pred = pd.concat([test_id_df.str.replace('validation','evaluation'), pred_df], axis=1)
+    sub_df = pd.concat([val_pred, eval_pred], axis=0)
+    print(sub_df)
+    sub_df.to_csv(f"{SAVE_DIR}/submission1.csv", index=False)
 
 
 if __name__ == "__main__":
