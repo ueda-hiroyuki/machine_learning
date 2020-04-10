@@ -88,7 +88,6 @@ def merge_data(dataset: pd.DataFrame, calendar: pd.DataFrame, price: pd.DataFram
 def add_trend(dataset: pd.DataFrame) -> pd.DataFrame:
     lags = [7, 30]
     window_sizes = [7, 30]
-    print(dataset)
     lag_cols = [f"lag_{lag}" for lag in lags ]
     for lag, lag_col in zip(lags, lag_cols):
         dataset[lag_col] = dataset[["id","count"]].groupby("id")["count"].shift(lag)
@@ -96,9 +95,32 @@ def add_trend(dataset: pd.DataFrame) -> pd.DataFrame:
     for window_size in window_sizes :
         for lag,lag_col in zip(lags, lag_cols):
             dataset[f"rmean_{lag}_{window_size}"] = dataset[["id", lag_col]].groupby("id")[lag_col].transform(lambda x : x.rolling(window_size).mean())
-        
-    print(dataset.isna().sum())
     return dataset.dropna()
+
+
+def get_model(train_dataset: t.Any, valid_dataset: t.Any) -> t.Any:
+    params = {
+        "objective": "regression",
+        "boosting_type": "gbdt",
+        'metric' : {'l2'},
+        'num_leaves' : 200,
+        'min_data_in_leaf': 1000,
+        'num_iterations' : 100,
+        'learning_rate' : 0.5,
+        'feature_fraction' : 0.6,
+    }
+    model = lgb.train(
+        params=params,
+        train_set=train_dataset,
+        valid_sets=valid_dataset,
+        early_stopping_rounds=10,
+    )
+    return model
+
+
+def predict_label(model: t.Any, test_df: pd.DataFrame) -> pd.Series:
+    y_pred = model.predict(test_df, num_iteration=model.best_iteration)
+    return pd.Series(y_pred)
 
 
 def main(train_path: str, calendar_path: str, price_path: str, sample_submission_path: str, save_dir: str) -> None:
@@ -109,7 +131,7 @@ def main(train_path: str, calendar_path: str, price_path: str, sample_submission
 
     meta = train.loc[:,TRAIN_META]
     train = train.drop(TRAIN_META, axis=1)
-    train = pd.concat([meta, extract_data(train, 1000)], axis=1)
+    train = pd.concat([meta, extract_data(train,100)], axis=1)
     train = train_preprocess(train, TRAIN_META)
 
     test1, test2 = test_preprocess(sample_submission, meta, TRAIN_META)
@@ -117,7 +139,30 @@ def main(train_path: str, calendar_path: str, price_path: str, sample_submission
     dataset = merge_data(dataset, calendar, price)
     dataset = add_trend(dataset)
     print(dataset)
+
+    dataset = cf.label_encorder(dataset, [*TRAIN_META, *ADD_COLS])
     
+    train = dataset[dataset["use"] == "train"]
+    valid = dataset[dataset["use"] == "test1"]
+    test = dataset[dataset["use"] == "test2"]
+    train_x = train.drop(["count", "use"], axis=1)
+    train_y = train.loc[:,"count"]
+    valid_x = valid.drop(["count", "use"], axis=1)
+    valid_y = valid.loc[:,"count"]
+    test_x = test.drop(["count", "use"], axis=1)
+
+    print(train_x)
+
+
+    train_dataset = lgb.Dataset(train_x, train_y)
+    valid_dataset = lgb.Dataset(valid_x, valid_y, reference=train_dataset)
+
+    model = get_model(train_dataset, valid_dataset)
+    y_pred = predict_label(model, test_x)
+
+    print(y_pred)    
+
+
 
 
 if __name__ == "__main__":
