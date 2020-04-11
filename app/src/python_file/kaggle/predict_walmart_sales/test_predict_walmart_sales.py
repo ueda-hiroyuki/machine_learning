@@ -11,6 +11,7 @@ from sklearn.model_selection import train_test_split, KFold, GridSearchCV, Rando
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, LabelEncoder
 from sklearn.metrics import mean_squared_error
 from kaggle.common import common_funcs as cf
+from datetime import datetime, timedelta
 
 TRAIN_PATH = 'src/sample_data/Kaggle/kaggle_dataset/predict_walmart_sales/sales_train_validation.csv'
 CALENDAR_PATH = 'src/sample_data/Kaggle/kaggle_dataset/predict_walmart_sales/calendar.csv'
@@ -30,6 +31,7 @@ h = 28
 max_lags = 57
 tr_last = 1913
 FIRST_DAY = 350
+fday = datetime(2016,4, 25)
 
 def create_dt(is_train = True, nrows = None, first_day = 1200):
     prices = pd.read_csv(PRICE_PATH, dtype = PRICE_DTYPES)
@@ -114,17 +116,17 @@ def main() -> None:
         "objective" : "poisson",
         "metric" :"rmse",
         "force_row_wise" : True,
-        "learning_rate" : 0.075,
+        "learning_rate" : 0.05,
         "sub_row" : 0.75,
         "bagging_freq" : 1,
         "lambda_l2" : 0.1,
         "metric": ["rmse"],
         'verbosity': 1,
         'num_iterations' : 2000,
-        'num_leaves': 128,
+        'num_leaves': 150,
         "min_data_in_leaf": 50,
     }
-    m_lgb = lgb.train(params, train_data, valid_sets = [fake_valid_data], verbose_eval=100) 
+    m_lgb = lgb.train(params, train_data, valid_sets = [fake_valid_data], verbose_eval=50) 
     alphas = [1.035, 1.03, 1.025]
     weights = [1/len(alphas)]*len(alphas)
     sub = 0.
