@@ -9,4 +9,4 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - PYTHONPATH=/srv/src/python_file/
+      - PYTHONPATH=/srv/src/

@@ -10,7 +10,7 @@ from scipy import stats
 from sklearn.model_selection import train_test_split, KFold, GridSearchCV, RandomizedSearchCV
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, LabelEncoder
 from sklearn.metrics import mean_squared_error
-from kaggle.common import common_funcs as cf
+from python_file.kaggle.common import common_funcs as cf
 
 TRAIN_PATH = 'src/sample_data/Kaggle/kaggle_dataset/predict_walmart_sales/sales_train_validation.csv'
 CALENDAR_PATH = 'src/sample_data/Kaggle/kaggle_dataset/predict_walmart_sales/calendar.csv'
