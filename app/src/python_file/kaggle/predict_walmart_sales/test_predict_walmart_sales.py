@@ -10,7 +10,6 @@ from scipy import stats
 from sklearn.model_selection import train_test_split, KFold, GridSearchCV, RandomizedSearchCV
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, LabelEncoder
 from sklearn.metrics import mean_squared_error
-from kaggle.common import common_funcs as cf
 from datetime import datetime, timedelta
 
 TRAIN_PATH = 'src/sample_data/Kaggle/kaggle_dataset/predict_walmart_sales/sales_train_validation.csv'
@@ -116,18 +115,18 @@ def main() -> None:
         "objective" : "poisson",
         "metric" :"rmse",
         "force_row_wise" : True,
-        "learning_rate" : 0.05,
+        "learning_rate" : 0.075,
         "sub_row" : 0.75,
         "bagging_freq" : 1,
         "lambda_l2" : 0.1,
         "metric": ["rmse"],
         'verbosity': 1,
-        'num_iterations' : 2000,
-        'num_leaves': 150,
-        "min_data_in_leaf": 50,
+        'num_iterations' : 1200,
+        'num_leaves': 128,
+        "min_data_in_leaf": 10,
     }
-    m_lgb = lgb.train(params, train_data, valid_sets = [fake_valid_data], verbose_eval=50) 
-    alphas = [1.035, 1.03, 1.025]
+    m_lgb = lgb.train(params, train_data, valid_sets = [fake_valid_data], verbose_eval=10) 
+    alphas = [1.025, 1.020, 1.015]
     weights = [1/len(alphas)]*len(alphas)
     sub = 0.
 
