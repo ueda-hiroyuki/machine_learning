@@ -18,7 +18,18 @@ def mean_squared_error(y: t.Sequence, t: t.Sequence) -> t.Sequence:
 
 def cross_entropy_error(y: t.Sequence, t: t.Sequence) -> t.Sequence:
     delta = 1e-7
-    e = - np.sum(t * np.log(y + delta)) # +deltaはlog0(-inf)とならないような対策
+    if y.ndim == 1:
+        y = y.reshape(1, y.size)
+        t = t.reshape(1, t.size)
+    batch_size = y.shape[0]
+    e = - np.sum(t * np.log(y + delta)) / batch_size # +deltaはlog0(-inf)とならないような対策
+    print(e)
+    return e
+
+
+def numerical_diff(f, x): #数値微分
+    h = 1e-4
+    e = (f(x+h) - f(x-h)) / 2*h # 前方差分((f(x+h)-f(x))/h)よりも中心差分を使用する
     return e
 
 
@@ -28,7 +39,9 @@ def main():
     train_size = x_train.shape[0]
     
     batch_mask = np.random.choice(train_size, batch_size) 
-    print(batch_size, train_size, batch_mask)
+
+    batch_x_train = x_train[batch_mask]
+    batch_t_train = t_train[batch_mask]
 
 
 if __name__ == "__main__":
