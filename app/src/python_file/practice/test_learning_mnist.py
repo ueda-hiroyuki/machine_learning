@@ -33,7 +33,30 @@ def numerical_diff(f, x): #数値微分
     return e
 
 
-def main():
+# 勾配ベクトルの算出
+def numerical_grad(f, x):
+    h = 1e-4
+    grad = np.zeros_like(x) # xと同じ形状の配列を生成
+    for idx in range(x.size):
+        fake_x = x 
+        val = fake_x[idx]
+        
+        fake_x[idx] = val + h
+        f1 = f(fake_x) # f(x+h)
+
+        fake_x[idx] = val - h
+        f2 = f(fake_x) # f(x-h)
+
+        grad[idx] = (f1-f2) / (2*h)
+    return grad
+
+
+def func_2(x):
+    f = np.sum(x**2)
+    return f
+
+
+def exec():
     batch_size = 10
     x_train, t_train = load_data()
     train_size = x_train.shape[0]
@@ -42,6 +65,10 @@ def main():
 
     batch_x_train = x_train[batch_mask]
     batch_t_train = t_train[batch_mask]
+
+def main():
+    diff = numerical_grad(func_2, np.array([3.0,4.0]))
+    print(diff)
 
 
 if __name__ == "__main__":
