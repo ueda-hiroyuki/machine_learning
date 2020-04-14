@@ -1,9 +1,13 @@
 import joblib
+import logging
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import typing as t
 from sample_data.deep_learning_documents.dataset import mnist as mn
+
+logging.basicConfig(level=logging.INFO)
+
 
 
 class SimpleNet:
@@ -58,7 +62,6 @@ class TwoLayerNet:
 
     def calc_gradient(self, x, t):
         loss_func = lambda W: self.calc_loss(x, t)
-        print(f"loss_func = {loss_func}")
         grads = {}
         grads["W1"] = numerical_grad(loss_func, self.params["W1"])
         grads["W2"] = numerical_grad(loss_func, self.params["W2"])
@@ -122,7 +125,6 @@ def gradient_descent(func, init_x, lr=0.01, step_num=100): # 勾配降下法
     x = init_x
     for n in range(step_num):
         grad = numerical_grad(func, x) # 勾配の算出
-        print(grad)
         x = x - lr * grad
     return x
 
@@ -144,20 +146,49 @@ def softmax_func(a):
     return exp_a / sum_exp_a
 
 
-def exec():
+def train():
     iter_num = 10000
     batch_size = 100
     learning_rate = 0.1
     x_train, t_train, x_test, t_test = load_data()
     train_size = x_train.shape[0]
-    print(x_train.shape)
+    train_loss_list = []
+    test_loss_list = []
+    train_accuracy_list = []
+    iter_per_epoch = max(train_size/batch_size, 1) # 1エポック毎の繰り返し数
 
     two_layer_net = TwoLayerNet(input_size=784, hidden_size=50, output_size=10)
 
+    # イテレーション(重みの更新)数分回す
     for i in range(iter_num):
+        logging.info(f"start {i}th iteration!!")
+        # ミニバッチ時のデータ選択
         batch_mask = np.random.choice(train_size, batch_size) # 全テストデータからランダムにbatch_size分だけ選択(return list of index)
         x_train_batch = x_train[batch_mask]
         t_train_batch = t_train[batch_mask]
+
+        # 勾配の計算
+        grads = two_layer_net.calc_gradient(x_train_batch, t_train_batch)
+
+        # パラメータ(重み, バイアス)の更新
+        for key in ("W1", "W2", "b1", "b2"):
+            two_layer_net.params[key] -= learning_rate * grads[key]
+
+        # 学習経過の記録(不要)
+        loss = two_layer_net.calc_loss(x_train_batch, t_train_batch)
+        train_loss_list.append(loss)
+
+        # 1エポック毎にテストデータでaccuracyを評価する
+        if i % iter_per_epoch == 0:
+            train_accuracy = two_layer_net.calc_accuracy(x_train, t_train)
+            test_accuracy = two_layer_net.calc_accuracy(x_test, t_test)
+            train_accuracy_list.append(train_accuracy)
+            test_accuracy_list.append(test_accuracy)
+            logging.info(f"train_accuracy: {train_accuracy}, test_accuracy: {test_accuracy}")
+
+
+
+    joblib.dump(two_layer_net.params, "params.pkl")
 
 
 def main():
@@ -170,4 +201,4 @@ def main():
 
 
 if __name__ == "__main__":
-    exec()
+    train()
