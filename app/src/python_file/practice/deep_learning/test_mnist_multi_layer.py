@@ -5,6 +5,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import typing as t
 from collections import OrderedDict
+from sample_data.deep_learning_documents.common.gradient import numerical_gradient
 
 logging.basicConfig(level=logging.INFO)
 
@@ -55,7 +56,7 @@ class TwoLayerNet:
         self.params["b2"] = weight_init_std * np.zeros(output_size)
         
         # レイヤの生成(入力層⇒隠れ層)
-        self.layers = OrderedDict() # 辞書型
+        self.layers = OrderedDict() # 追加した順番を認知可能な辞書型
         self.layers["Affine1"] = Affine(self.params["W1"], self.params["b1"] )
         self.layers["Relu1"] = Relu()
         self.layers["Affine2"] = Affine(self.params["W2"], self.params["b2"] )
@@ -69,13 +70,14 @@ class TwoLayerNet:
     # 認識(推論)を行う(引数xは画像データ)
     def predict(self, x):
         for layer in self.layers.values(): # Affine1, Relu1, Affine2の計算を行う。
-            x = self.layers[layer].forward(x) # 前層の入力から算出した出力が次層の入力となる。
+            x = layer.forward(x) # 前層の入力から算出した出力が次層の入力となる。
         return x 
 
     # 損失関数の算出    
     def calc_loss(self, x, t): # x:入力データ、t:教師データ
         y = self.predict(x)
-        loss_func = self.last_layer.forward(x, t) # 最終層で損失関数の値を算出
+        print(y.shape)
+        loss_func = self.last_layer.forward(y, t) # 最終層で損失関数の値を算出
         return loss_func
     
     # 認識算出の算出
@@ -86,13 +88,25 @@ class TwoLayerNet:
             t = np.argmax(t, axis=1)
         accuracy = np.sum(y == t) / float(x.shape[0])
 
+    def calc_numerical_gradient(self, x, t):
+        loss_func = lambda W: self.calc_loss(x, t)
+        grads = {}
+        grads["W1"] = numerical_gradient(loss_func, self.params["W1"])
+        grads["W2"] = numerical_gradient(loss_func, self.params["W2"])
+        grads["b1"] = numerical_gradient(loss_func, self.params["b1"])
+        grads["b2"] = numerical_gradient(loss_func, self.params["b2"])
+        return grads
+
     # 重みパラメータに対する勾配(誤差関数の傾き)を誤差逆伝播法により算出
     def calc_gradient(self, x, t):
         # forward
         loss_func = self.calc_loss(x, t)
         # backward
-        d_out = self.last_layer.backward(d_out)
-        for layer in list(self.params.values()).reverse(): # Affine2 ⇒ Relu1 ⇒ Affine1と誤差を逆伝播する。
+        d_out = self.last_layer.backward(self.d_out)
+        layers = list(self.layers.values())
+        layers.reverse()
+        print(layers)
+        for layer in layers: # Affine2 ⇒ Relu1 ⇒ Affine1と誤差を逆伝播する。
             d_out = layer.backward(d_out)
 
         # 各層における勾配
@@ -162,7 +176,10 @@ class SoftmaxWithLoss: # 活性化関数SoftMaxを用いる場合(分類)、損�
 
     def forward(self, x, t):
         self.t = t
-        self.y = softmax_func(x)
+        self.y = self.common.softmax_func(x)
+        print("##########################")
+        print(self.y.shape)
+        print("##########################")
         self.loss = self.common.cross_entropy_error(self.y, self.t)
         return self.loss
 
@@ -176,28 +193,28 @@ class CommonFunctions:
     def __init__(self):
         pass
 
-    def softmax_func(a):
+    def softmax_func(self, a):
         c = np.max(a)
         exp_a = np.exp(a - c) # オーバーフロー対策
         sum_exp_a = np.sum(exp_a)
         return exp_a / sum_exp_a
     
-    def sigmoid_func(x):
+    def sigmoid_func(self, x):
         y = 1 / (1 + np.exp(-x))
         return y 
 
-    def mean_squared_error(y: t.Sequence, t: t.Sequence) -> t.Sequence:
+    def mean_squared_error(self, y: t.Sequence, t: t.Sequence) -> t.Sequence:
         e = 1/2 * (np.sum((y-k)**2))
         return e
 
-    def cross_entropy_error(y, t):
+    def cross_entropy_error(self, y, t):
         if y.ndim == 1:
             t = t.reshape(1, t.size)
             y = y.reshape(1, y.size)
             
         # 教師データ(t)がone-hot-vectorの場合、正解ラベルのインデックスに変換される ⇒ ex) [0,0,1,0,0,0] = [2]
         if t.size == y.size:
-            t = t.argmax(axis=1)
+            t = np.argmax(t, axis=1)
                 
         batch_size = y.shape[0]
         return -np.sum(np.log(y[np.arange(batch_size), t] + 1e-7)) / batch_size
