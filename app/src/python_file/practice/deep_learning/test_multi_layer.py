@@ -4,7 +4,6 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import typing as t
-from collections import OrderedDict
 
 logging.basicConfig(level=logging.INFO)
 
@@ -39,71 +38,6 @@ class AddLayer: # 加算レイヤ
         return dx, dy
 
 
-class TwoLayerNet:
-    def __init__(
-        self,
-        input_size,
-        hidden_size,
-        output_size,
-        weight_init_std=0.01,
-    ):
-        # 重みの初期化
-        self.params = {}
-        self.params["W1"] = weight_init_std * np.random.randn(input_size, hidden_size)
-        self.params["b1"] = weight_init_std * np.zeros(hidden_size)
-        self.params["W2"] = weight_init_std * np.random.randn(hidden_size, output_size)
-        self.params["b2"] = weight_init_std * np.zeros(output_size)
-        
-        # レイヤの生成(入力層⇒隠れ層)
-        self.layers = OrderedDict() # 辞書型
-        self.layers["Affine1"] = Affine(self.params["W1"], self.params["b1"] )
-        self.layers["Relu1"] = Relu()
-        self.layers["Affine2"] = Affine(self.params["W2"], self.params["b2"] )
-
-        # レイヤの生成(隠れ層⇒出力層)
-        self.last_layer = SoftmaxWithLoss()
-
-        # 最終層からの信号
-        self.d_out = 1
-
-    # 認識(推論)を行う(引数xは画像データ)
-    def predict(self, x):
-        for layer in self.layers.values(): # Affine1, Relu1, Affine2の計算を行う。
-            x = self.layers[layer].forward(x) # 前層の入力から算出した出力が次層の入力となる。
-        return x 
-
-    # 損失関数の算出    
-    def calc_loss(self, x, t): # x:入力データ、t:教師データ
-        y = self.predict(x)
-        loss_func = self.last_layer.forward(x, t) # 最終層で損失関数の値を算出
-        return loss_func
-    
-    # 認識算出の算出
-    def calc_accuracy(self, x, t):
-        y = self.predict(x)
-        y = np.argmax(y, axis=1)
-        if y.ndim != 1: # バッチ対応
-            t = np.argmax(t, axis=1)
-        accuracy = np.sum(y == t) / float(x.shape[0])
-
-    # 重みパラメータに対する勾配を誤差逆伝播法により算出
-    def calc_gradient(self, x, t):
-        # forward
-        loss_func = self.calc_loss(x, t)
-        # backward
-        d_out = self.last_layer.backward(d_out)
-        for layer in list(self.params.values()).reverse(): # Affine2 ⇒ Relu1 ⇒ Affine1と誤差を逆伝播する。
-            d_out = layer.backward(d_out)
-
-        # 各層における逆伝播誤差
-        grads = {}
-        grads["W1"] = self.layers["Affine1"].d_W
-        grads["b1"] = self.layers["Affine1"].d_b
-        grads["W2"] = self.layers["Affine2"].d_W
-        grads["b2"] = self.layers["Affine2"].d_b
-        return grads
-        
-
 class Relu:
     def __init__(self):
         self.mask = None
@@ -115,7 +49,7 @@ class Relu:
         return out 
     
     def backward(self, d_out):
-        d_out[self.mask] = 0 # Trueの部分(0以下の部分)は0で返す
+        d_out[self.mask] = 0
         d_x = d_out
         return d_x
 
@@ -133,8 +67,7 @@ class Sigmoid:
         dx = d_out * out(1.0 - out)
         return d_x
 
-# 行列の積を算出するクラス(y=x*w+b)
-class Affine:
+class Affine(self):
     def __init__(self, W, b):
         self.W = W
         self.b = b
@@ -169,7 +102,7 @@ class SoftmaxWithLoss: # 活性化関数SoftMaxを用いる場合(分類)、損�
     def backward(self, d_out=1):
         batch_size = self.t.shape[0] # 教師データの"行"に相当する部分
         d_x = (self.y - self.t) / batch_size # バッチサイズで割ることでデータ1つ当たりの誤差を前層に伝搬することができる。
-        return d_x
+        return　d_x
         
     
 class CommonFunctions:
@@ -204,9 +137,6 @@ class CommonFunctions:
 
 
 def main():
-    two_layer_net = TwoLayerNet(input_size=784, hidden_size=100, output_size=10, weight_init_std=0.01)
-    x = np.array([[1,1,0],[2,3,4]])
-    two_layer_net.predict(x)
 
 if __name__ == "__main__":
     main()
