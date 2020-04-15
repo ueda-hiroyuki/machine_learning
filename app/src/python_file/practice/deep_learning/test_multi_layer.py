@@ -39,7 +39,7 @@ class AddLayer: # 加算レイヤ
 
 
 class Relu:
-    def __iinit__(self):
+    def __init__(self):
         self.mask = None
 
     def forward(self, x):
@@ -86,36 +86,57 @@ class Affine(self):
         self.d_b = np.sum(d_out, axis=0)
         return d_x
 
+class SoftmaxWithLoss: # 活性化関数SoftMaxを用いる場合(分類)、損失関数として交差エントロピー誤差を用いる。
+    def __init__(self):
+        self.loss = None # 損失
+        self.y = None # softmax関数の出力
+        self.t = None # 教師ラベル(one-hot-vector)
+        self.common = CommonFunctions()   
+
+    def forward(self, x, t):
+        self.t = t
+        self.y = softmax_func(x)
+        self.loss = self.common.cross_entropy_error(self.y, self.t)
+        return self.loss
+
+    def backward(self, d_out=1):
+        batch_size = self.t.shape[0] # 教師データの"行"に相当する部分
+        d_x = (self.y - self.t) / batch_size # バッチサイズで割ることでデータ1つ当たりの誤差を前層に伝搬することができる。
+        return　d_x
+        
+    
+class CommonFunctions:
+    def __init__(self):
+        pass
+
+    def softmax_func(a):
+        c = np.max(a)
+        exp_a = np.exp(a - c) # オーバーフロー対策
+        sum_exp_a = np.sum(exp_a)
+        return exp_a / sum_exp_a
+    
+    def sigmoid_func(x):
+        y = 1 / (1 + np.exp(-x))
+        return y 
+
+    def mean_squared_error(y: t.Sequence, t: t.Sequence) -> t.Sequence:
+        e = 1/2 * (np.sum((y-k)**2))
+        return e
+
+    def cross_entropy_error(y, t):
+        if y.ndim == 1:
+            t = t.reshape(1, t.size)
+            y = y.reshape(1, y.size)
+            
+        # 教師データ(t)がone-hot-vectorの場合、正解ラベルのインデックスに変換される ⇒ ex) [0,0,1,0,0,0] = [2]
+        if t.size == y.size:
+            t = t.argmax(axis=1)
+                
+        batch_size = y.shape[0]
+        return -np.sum(np.log(y[np.arange(batch_size), t] + 1e-7)) / batch_size
+
 
 def main():
-    apple = 100
-    apple_num = 2
-    orange = 150
-    orange_num = 3 
-    tax = 1.1
-    d_price = 1
-    
-    multi_apple_layer = MultiLayer()
-    multi_orange_layer = MultiLayer()
-    add_price_layer = AddLayer()
-    multi_tax_layer = MultiLayer()
-
-    # forward
-    apple_price = multi_apple_layer.forward(apple, apple_num)
-    orange_price = multi_orange_layer.forward(orange, orange_num)
-    price = add_price_layer.forward(apple_price, orange_price)
-    total_price = multi_tax_layer.forward(price, tax)
-
-    #backward
-    d_price, d_tax = multi_tax_layer.backward(d_price)
-    d_apple_price, d_orange_price = add_price_layer.backward(d_price)
-    d_apple, d_apple_num = multi_apple_layer.backward(d_apple_price)
-    d_orange, d_orange_num = multi_orange_layer.backward(d_orange_price)
-
-    print(d_apple, d_apple_num,d_orange, d_orange_num, d_tax)    
-
-
-
 
 if __name__ == "__main__":
     main()
