@@ -8,7 +8,7 @@ from PIL import Image
 
 
 def init_network():
-    network = joblib.load("src/sample_data/deep_learning_documents/dataset/sample_weight.pkl")
+    network = joblib.load("src/sample_data/mnist/params_backprop.pkl")
     return network
 
 
@@ -39,6 +39,15 @@ def predict(network, x):
     a3 = np.dot(z2, W3) + b3
     y = softmax_func(a3)
     return y
+
+def predict_two_later(network, x):
+    W1, W2 = network["W1"], network["W2"]
+    b1, b2 = network["b1"], network["b2"]
+    a1 = np.dot(x, W1) + b1
+    z1 = sigmoid_func(a1)
+    a2 = np.dot(z1, W2) + b2
+    y = softmax_func(a2)
+    return y
     
 
 def main():
@@ -47,7 +56,7 @@ def main():
     x_test, t_test = load_data()
     accuracy_cnt = 0
     for idx in range(0, len(x_test), batch_size):
-        pred = predict(network, x_test[idx: idx + batch_size])
+        pred = predict_two_later(network, x_test[idx: idx + batch_size])
         p = np.argmax(pred, axis=1)
         match = np.sum(p == t_test[idx: idx + batch_size])
         accuracy_cnt += match

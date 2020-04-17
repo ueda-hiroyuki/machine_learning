@@ -5,9 +5,9 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import typing as t
 from sample_data.deep_learning_documents.dataset import mnist as mn
+from python_file.practice.deep_learning.test_mnist_multi_layer import TwoLayerBackProp 
 
 logging.basicConfig(level=logging.INFO)
-
 
 
 class SimpleNet:
@@ -146,7 +146,7 @@ def softmax_func(a):
     return exp_a / sum_exp_a
 
 
-def train():
+def train_numerical():
     iter_num = 10000
     batch_size = 100
     learning_rate = 0.1
@@ -186,10 +186,35 @@ def train():
             test_accuracy_list.append(test_accuracy)
             logging.info(f"train_accuracy: {train_accuracy}, test_accuracy: {test_accuracy}")
 
-
-
     joblib.dump(two_layer_net.params, "params.pkl")
 
+
+def train_backprop():
+    iter_num = 10000
+    batch_size = 100
+    learning_rate = 0.1
+    x_train, t_train, x_test, t_test = load_data()
+    train_size = x_train.shape[0]
+    train_loss_list = []
+    test_loss_list = []
+    train_accuracy_list = []
+    iter_per_epoch = max(train_size/batch_size, 1) # 1エポック毎の繰り返し数
+    two_layer_net = TwoLayerBackProp(input_size=784, hidden_size=50, output_size=10)
+    
+    for i in range(iter_num):
+        logging.info(f"start {i}th iteration!!")
+        batch_mask = np.random.choice(train_size, batch_size)
+        x_train_batch = x_train[batch_mask]
+        t_train_batch = t_train[batch_mask]
+        # 誤差逆伝播法により勾配を算出する。
+        grads = two_layer_net.calc_gradient(x_train_batch, t_train_batch)
+
+        for key in grads.keys():
+            # iteration毎に重み、バイアスを更新する
+            two_layer_net.params[key] -= learning_rate * grads[key]
+
+    joblib.dump(two_layer_net.params, "src/sample_data/mnist/params_backprop.pkl")
+        
 
 def main():
     two_layer_net = TwoLayerNet(input_size=784, hidden_size=100, output_size=10)
@@ -201,4 +226,4 @@ def main():
 
 
 if __name__ == "__main__":
-    train()
+    train_backprop()

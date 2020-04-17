@@ -40,7 +40,7 @@ class AddLayer: # 加算レイヤ
         return dx, dy
 
 
-class TwoLayerNet:
+class TwoLayerBackProp:
     def __init__(
         self,
         input_size,
@@ -76,7 +76,6 @@ class TwoLayerNet:
     # 損失関数の算出    
     def calc_loss(self, x, t): # x:入力データ、t:教師データ
         y = self.predict(x)
-        print(y.shape)
         loss_func = self.last_layer.forward(y, t) # 最終層で損失関数の値を算出
         return loss_func
     
@@ -105,7 +104,6 @@ class TwoLayerNet:
         d_out = self.last_layer.backward(self.d_out)
         layers = list(self.layers.values())
         layers.reverse()
-        print(layers)
         for layer in layers: # Affine2 ⇒ Relu1 ⇒ Affine1と誤差を逆伝播する。
             d_out = layer.backward(d_out)
 
@@ -177,9 +175,6 @@ class SoftmaxWithLoss: # 活性化関数SoftMaxを用いる場合(分類)、損�
     def forward(self, x, t):
         self.t = t
         self.y = self.common.softmax_func(x)
-        print("##########################")
-        print(self.y.shape)
-        print("##########################")
         self.loss = self.common.cross_entropy_error(self.y, self.t)
         return self.loss
 
@@ -187,8 +182,8 @@ class SoftmaxWithLoss: # 活性化関数SoftMaxを用いる場合(分類)、損�
         batch_size = self.t.shape[0] # 教師データの"行"に相当する部分
         d_x = (self.y - self.t) / batch_size # バッチサイズで割ることでデータ1つ当たりの誤差を前層に伝搬することができる。
         return d_x
-        
-    
+
+
 class CommonFunctions:
     def __init__(self):
         pass
@@ -218,7 +213,7 @@ class CommonFunctions:
                 
         batch_size = y.shape[0]
         return -np.sum(np.log(y[np.arange(batch_size), t] + 1e-7)) / batch_size
-
+ 
 
 def main():
     two_layer_net = TwoLayerNet(input_size=784, hidden_size=100, output_size=10, weight_init_std=0.01)
