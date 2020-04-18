@@ -38,7 +38,7 @@ class Sigmoid:
 
 class Affine:
     def __init__(self, W, b):
-        self.W =W
+        self.W = W
         self.b = b
         
         self.x = None
@@ -119,7 +119,7 @@ class BatchNormalization:
         self.running_var = running_var  
 
         # 逆伝播時に使用する中間データ
-        self.batch_size = batch_size
+        self.batch_size = None
         self.xc = None
         self.xn = None
         self.std = None
@@ -143,7 +143,7 @@ class BatchNormalization:
         if train_flag:
             mu = x.mean(axis=0) # 平均
             xc = x - mu
-            var = np.mean(xc**2, axis=0)　# 分散(標準偏差**2)
+            var = np.mean(xc**2, axis=0) # 分散(標準偏差**2)
             std = np.sqrt(var + 10e-7) # 標準偏差(+10e-7はゼロ除算を回避するため)
             xn = xc / std
 
