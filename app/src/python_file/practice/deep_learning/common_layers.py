@@ -90,3 +90,44 @@ class SoftmaxWithLoss:
         
         return dx
 
+class Dropout:
+    def __init__(self, dropout_ratio=0.5):
+        self.dropout_ratio = dropout_ratio
+        self.nask = None
+
+    def forward(self, x, train_flag=True):
+        if train_flag: # 学習時のみDropoutを使用する
+            self.mask = np.random.rand(*x.shape) > self.dropout_ratio #randomマスクで出力値を制限してやる(次層への伝播は行われない)
+            return x * self.mask
+        else:
+            return x * (1 - self.dropout_ratio)
+
+    def backward(self, dout):
+        return dout * self.mask # 逆伝播時も順伝播時のmaskを用いる
+
+# Affineレイヤからの出力を正規化(標準化)を行った後、活性化関数を適応する
+class BatchNormalization:
+    def __init__(self, gamma, beta, momentum=0.9, running_mean=None, running_var=None):
+        self.gamma = gamma
+        self.beta = beta
+        self.momentum = momentum
+        self.input_shape = None
+
+        # テスト時に使用する平均と分散   
+        self.running_mean = running_mean
+        self.running_var = running_var  
+
+        # 逆伝播時に使用する中間データ
+        self.batch_size = batch_size
+        self.xc = None
+        self.std = None
+        self.dgamma = None
+        self.dbeta = None
+
+    def forward(self, x, train_flag=True):
+        self.input_shape = x.shape
+        if x.ndim != 2:
+            N, C, H, W = x.shape
+            x = x.reshape(N, -1)
+        out = self._forward(x, train_flag)
+        return out.reshape(*self.input_shape)
