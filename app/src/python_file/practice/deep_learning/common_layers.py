@@ -50,6 +50,7 @@ class Affine:
     def forward(self, x):
         # テンソル対応
         self.original_x_shape = x.shape
+        # 入力値を1次元配列に変換して出力
         x = x.reshape(x.shape[0], -1)
         self.x = x
 
