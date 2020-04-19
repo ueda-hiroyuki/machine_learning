@@ -92,6 +92,7 @@ class MultiLayerNetExtend:
         self.dropout = dropout
         self.weight_decay_lambda = weight_decay_lambda
         self.batch_normal = batch_normal
+        self.all_list_size = len([input_size] + hidden_size_list + [output_size])
 
         # 重みの初期化(学習が効率よく進むような初期値)
         self._init_weight(weight_init_std)
@@ -106,7 +107,7 @@ class MultiLayerNetExtend:
                 self.params[f'gamma{i}'] = np.ones(hidden_size_list[i-1]) # 前層のニューロン数の要素が1の配列を作成する
                 self.params[f'beta{i}'] = np.zeros(hidden_size_list[i-1]) # 前層のニューロン数の要素が0の配列を作成する
                 self.layers [f'BatchNorm'] = BatchNormalization(self.params[f'gamma{i}'], self.params[f'beta{i}'])
-            
+        
             # アクティベーションレイヤ
             self.layers[f'Activation{i}'] = activation_layer[activation]() # 引数として与えた値に応じて活性化関数を変える
 
@@ -117,7 +118,7 @@ class MultiLayerNetExtend:
         # 出力層
         idx = self.hidden_size_num+1 # 入力層+隠れ層
         self.layers[f'Affine{idx}'] = Affine(self.params[f"W{idx}"], self.params[f"b{idx}"])
-        self.last_layer = SoftmaxWithLoss() # 最終層にはソフトマックス関数+交差エントロピー誤差を適応
+        self.lastLayer = SoftmaxWithLoss() # 最終層にはソフトマックス関数+交差エントロピー誤差を適応
 
 
     def _init_weight(self, weight_init_std):
@@ -130,17 +131,26 @@ class MultiLayerNetExtend:
             elif weight_init_std in ('sigmoid', 'xavier'):
                 scale = np.sqrt(1/all_list_size[i-1]) # Xavierの初期値を設定する場合、標準偏差としてsqrt(1/n)を用いる(nは前層のニューロンの数)
             self.params[f"W{i}"] = scale * np.random.randn(all_list_size[i-1], all_list_size[i])
-            self.params[f"b{i}"] = np.zeros_like(all_list_size[i])
+            self.params[f"b{i}"] = np.zeros(all_list_size[i])
         
-    def predict(self, x):
-        for layer in self.layers.values():
-            x = layer.forward(x)
+    def predict(self, x, train_flag=False):
+        for key, layer in self.layers.items():
+            if "Dropout" in key or "BatchNormal" in key:
+                x = layer.forward(x, train_flag)
+            else:
+                x = layer.forward(x)
         return x
         
     # x:入力データ, t:教師データ
-    def loss(self, x, t):
-        y = self.predict(x)
-        return self.lastLayer.forward(y, t)
+    def loss(self, x, t, train_flag=False):
+        y = self.predict(x, train_flag)
+        weight_decay = 0
+        # 各層における重みにペナルティを加算する(重みの増加を抑えることで過学習を抑制できる)
+        for i in range(1, self.all_list_size):
+            W = self.params[f'W{i}']
+            weight_decay += 1/2 * self.weight_decay_lambda * np.sum(W**2) 
+        # 出力された損失関数にL2正則化項を加算する
+        return self.lastLayer.forward(y, t) + weight_decay
     
     def accuracy(self, x, t):
         y = self.predict(x)
@@ -161,7 +171,7 @@ class MultiLayerNetExtend:
         
     def gradient(self, x, t):
         # forward
-        self.loss(x, t)
+        self.loss(x, t, train_flag=True)
         # backward
         dout = 1
         dout = self.lastLayer.backward(dout)
@@ -172,6 +182,12 @@ class MultiLayerNetExtend:
             dout = layer.backward(dout)
         # 設定
         grads = {}
-        grads['W1'], grads['b1'] = self.layers['Affine1'].dW, self.layers['Affine1'].db
-        grads['W2'], grads['b2'] = self.layers['Affine2'].dW, self.layers['Affine2'].db
+        for i in range(1, self.all_list_size):
+            # 重みの勾配を求める場合、誤差逆伝播法の結果にλWを加算すればよい(λW：1/2*λW**2の微分値)
+            grads[f'W{i}'] = self.layers[f'Affine{i}'].dW + self.weight_decay_lambda * self.params[f'W{i}']
+            grads[f'b{i}'] = self.layers[f'Affine{i}'].db
+            if self.batch_normal and i != self.all_list_size-1:
+                grads[f'gamma{i}'] = self.layers[f'BatchNorm'].dgamma
+                grads[f'beta{i}'] = self.layers[f'BatchNorm'].dbeta
+
         return grads

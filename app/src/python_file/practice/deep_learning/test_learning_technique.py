@@ -37,18 +37,17 @@ class Momentum:
 class AdaGrad:
     def __init__(self, lr=0.01):
         self.lr = lr
-        self.h =None
+        self.h = None
 
     def update(self, params, grads):
         # 初期化として、paramsのvalueと同型のゼロ配列を作成する。
         if self.h is None:
             self.h = {}
-            for key, value in params.items:
+            for key, value in params.items():
                 self.h[key] = np.zeros_like(value)
-        for key in params.keys:
+        for key in params.keys():
             self.h[key] += grads[key] * grads[key]
-            params[key] -= self.lr * grads[key] / (np.sqrt(self.h) + 1e-7) # +1e-7はゼロ除算対策
-      
+            params[key] -= self.lr * grads[key] / (np.sqrt(self.h[key]) + 1e-7) # +1e-7はゼロ除算対策
 
 
 def main():    

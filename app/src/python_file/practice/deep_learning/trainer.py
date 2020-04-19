@@ -7,6 +7,7 @@ import typing as t
 from collections import OrderedDict
 from python_file.practice.deep_learning.test_learning_technique import *
 
+logging.basicConfig(level=logging.INFO)
 
 # ニューラルネットワークの学習を行うクラス
 class Trainer:
@@ -38,7 +39,7 @@ class Trainer:
         optimizer_class_dict = {
             'sgd': SGD,
             'momentum': Momentum,
-            'adagrad': Adagrad
+            'adagrad': AdaGrad
         } 
 
         self.optimizer = optimizer_class_dict[optimizer](**optimizer_param)
@@ -56,7 +57,7 @@ class Trainer:
             self.train_step() # イテレーション数だけ学習を行う。
 
         test_acc = self.network.accuracy(self.x_test, self.t_test)
-        logger.info(f'=============== Final Test Accuracy : {test_acc}===============')
+        logging.info(f'=============== Final Test Accuracy : {test_acc}===============')
 
     
     def train_step(self):
@@ -70,11 +71,10 @@ class Trainer:
 
         loss = self.network.loss(x_train_batch, t_train_batch)
         self.train_loss_list.append(loss)
-        logging.info(f"train loss : {loss}")
 
         # 特定のイテレーションにおいて評価を行う
         if self.current_iter % self.iter_per_epoch == 0:
-            sel.current_epoch += 1
+            self.current_epoch += 1
             # 全データ
             x_train_sample, t_train_sample = self.x_train, self.t_train
             x_test_sample, t_test_sample = self.x_test, self.t_test
@@ -89,5 +89,5 @@ class Trainer:
             self.train_acc_list.append(train_acc)
             self.test_acc_list.append(test_acc)
 
-            if self.verbose: print(f"=== epoch: {self.current_epoch}, train acc: {train_acc}, test acc: {test_acc} ===")
+            logging.info(f"=== epoch: {self.current_epoch}, train acc: {train_acc}, test acc: {test_acc} ===")
         self.current_iter += 1
