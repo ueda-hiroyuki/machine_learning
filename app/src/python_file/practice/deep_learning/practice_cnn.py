@@ -4,8 +4,9 @@ from python_file.practice.deep_learning.common_layers import *
 from python_file.practice.deep_learning.simple_conv_net import *
 
 def main():
-    img = np.random.randint(0,9,(2,3,4,4))
+    img = np.random.randn(30,1,12,12)
     network = SimpleConvNet()
+    out = network.layers['Pool1'].forward(img)
 
 
 

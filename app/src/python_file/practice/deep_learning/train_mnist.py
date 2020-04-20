@@ -8,6 +8,7 @@ from collections import OrderedDict
 from python_file.practice.deep_learning.trainer import Trainer
 from python_file.practice.deep_learning.common_layers import *
 from python_file.practice.deep_learning.multi_layer_net import *
+from python_file.practice.deep_learning.simple_conv_net import *
 from sample_data.deep_learning_documents.dataset.mnist import load_mnist
 
 logging.basicConfig(level=logging.INFO)
@@ -99,5 +100,39 @@ def train_mnist_extend():
     plt.savefig("src/sample_data/mnist/params_backprop.png")
     logging.info(f'======== Figure saved !! ========')
 
+
+def train_mnist_by_cnn():
+    # データの読み込み
+    (x_train, t_train), (x_test, t_test) = load_mnist(flatten=False)
+
+    # 処理に時間のかかる場合はデータを削減 
+    x_train, t_train = x_train[:500], t_train[:500]
+    x_test, t_test = x_test[:100], t_test[:100]
+
+    max_epochs = 1
+
+    network = SimpleConvNet(
+        input_dim=(1,28,28), 
+        conv_param = {'filter_num': 30, 'filter_size': 5, 'padding': 0, 'stride': 1},
+        hidden_size=100, 
+        output_size=10, 
+        weight_init_std=0.01
+    )
+                            
+    trainer = Trainer(
+        network, 
+        x_train, 
+        t_train, 
+        x_test, 
+        t_test,
+        epoch_num=max_epochs, 
+        batch_size=100,
+        optimizer='adagrad', 
+        optimizer_param={'lr': 0.001},
+        evaluate_sample_num_per_epoch=None, 
+    )
+
+    trainer.train()
+
 if __name__ == "__main__":
-    train_mnist_extend()
+    train_mnist_by_cnn()

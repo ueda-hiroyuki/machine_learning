@@ -1,6 +1,8 @@
 import numpy as np
+import logging
 from python_file.practice.deep_learning.common_func import CommonFunctions
 
+logging.basicConfig(level=logging.INFO)
 cm = CommonFunctions()
 
 class Relu:
@@ -50,10 +52,9 @@ class Affine:
     def forward(self, x):
         # テンソル対応
         self.original_x_shape = x.shape
-        # 入力値を1次元配列に変換して出力
+        # 入力値(4次元配列)を2次元配列に変換して出力
         x = x.reshape(x.shape[0], -1)
         self.x = x
-
         out = np.dot(self.x, self.W) + self.b
 
         return out
@@ -188,7 +189,7 @@ class Convolution:
         self.W = W
         self.b = b
         self.stride = stride
-        self.pad = pad
+        self.padding = padding
         
         # 中間データ（backward時に使用）
         self.x = None   
@@ -203,8 +204,8 @@ class Convolution:
         FN, C, FH, FW = self.W.shape # 重み(フィルター)
         N, C, H, W = x.shape
 
-        out_h = int(cm.conv_output_size(H, FH))
-        out_w = int(cm.conv_output_size(W, FW))
+        out_h = 1 + int((H + 2*self.padding - FH) / self.stride)
+        out_w = 1 + int((W + 2*self.padding - FW) / self.stride)
 
         # im2col関数による入力画像データ変換
         col = cm.im2col(x, FH, FW, self.stride, self.padding)
@@ -212,6 +213,9 @@ class Convolution:
         col_W = self.W.reshape(FN, -1).T # 転置
         out = np.dot(col, col_W) + self.b
         out = out.reshape(N, out_h, out_w, -1).transpose(0,3,1,2)
+        self.x = x
+        self.col = col
+        self.col_W = col_W
         return out
 
     def backward(self, dout):
@@ -237,12 +241,14 @@ class Pooling:
 
     def forward(self, x):
         N, C, H, W = x.shape
-        out_h = int(cm.conv_output_size(H, self.pool_h))
-        out_w = int(cm.conv_output_size(W, self.pool_w))
+        # out_h = int(cm.conv_output_size(H, self.pool_h))
+        # out_w = int(cm.conv_output_size(W, self.pool_w))
+        out_h = int(1 + (H - self.pool_h) / self.stride)
+        out_w = int(1 + (W - self.pool_w) / self.stride)
         
         col = cm.im2col(x, self.pool_h, self.pool_w, self.stride, self.padding)
         col = col.reshape(-1, self.pool_h*self.pool_w)
-        
+
         arg_max = np.argmax(col, axis=1) # 2次元配列の列方向の最大idxの配列を返す
         out = np.max(col, axis=1) # 2次元配列の行毎の最大値の配列を返す
         out = out.reshape(N, out_h, out_w, C).transpose(0, 3, 1, 2)
@@ -260,7 +266,7 @@ class Pooling:
         dmax = dmax.reshape(dout.shape + (pool_size,)) 
         
         dcol = dmax.reshape(dmax.shape[0] * dmax.shape[1] * dmax.shape[2], -1)
-        dx = col2im(dcol, self.x.shape, self.pool_h, self.pool_w, self.stride, self.padding)
+        dx = cm.col2im(dcol, self.x.shape, self.pool_h, self.pool_w, self.stride, self.padding)
         
         return dx
 
