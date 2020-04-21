@@ -241,8 +241,6 @@ class Pooling:
 
     def forward(self, x):
         N, C, H, W = x.shape
-        # out_h = int(cm.conv_output_size(H, self.pool_h))
-        # out_w = int(cm.conv_output_size(W, self.pool_w))
         out_h = int(1 + (H - self.pool_h) / self.stride)
         out_w = int(1 + (W - self.pool_w) / self.stride)
         
