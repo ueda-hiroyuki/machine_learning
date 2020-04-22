@@ -54,10 +54,9 @@ class ConvolutionalNeuralNetwork(nn.Module):
     def forward(self, x):
         x = self.block1(x)
         x = self.block2(x)
-        print(x.shape)
-
-
-
+        x = x.view(x.size(0), 32 * 26 * 26) # block2までの出力は3次元であるため、Affineを行う為には2次元変換する
+        output = self.full_conn(x)
+        return output # 最終出力は2次元
 
 
 # input_size:1(n:4), hidden_size:2(n:10,8), output_size: 1(3)のシンプルなニューラルネットワーク
@@ -112,14 +111,12 @@ def train_nn_by_pytorch():
     print(network)
 
 
-def train_cnn_by_pytorch():
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
- 
+def train_cnn_by_pytorch(): 
     batch_size = 100
     num_classes = 10
     epochs = 3
 
-    (x_train, t_train), (x_test, t_test) = load_mnist(normalize=True, one_hot_label=True)
+    (x_train, t_train), (x_test, t_test) = load_mnist(normalize=True, one_hot_label=False)
     network = ConvolutionalNeuralNetwork(num_classes)
     
     # データのフォーマットを変換：PyTorchでの形式 = [画像数，チャネル数，高さ，幅]
@@ -129,10 +126,37 @@ def train_cnn_by_pytorch():
     # PyTorchのテンソルに変換
     x_train = torch.Tensor(x_train).float()
     x_test = torch.Tensor(x_test).float()
-    t_train = torch.Tensor(t_train).float()
-    t_test = torch.Tensor(t_test).float()
+    t_train = torch.LongTensor(t_train) # labelにはint型(LongTensor型)を用いる ⇒ floatは×
+    t_test = torch.LongTensor(t_test)
 
-    x_train_ = DataLoader(t_train, batch_size=batch_size, shuffle=True)
+    # 学習用と評価用のデータセットを作成(60000枚分)
+    train_dataset = TensorDataset(x_train, t_train)
+    test_dataset = TensorDataset(x_test, t_test)
+    
+    # データセットをバッチサイズ毎に分割する(ex: dataset:100, batchsize:20 ⇒ tensor(20 × 5)に分割)
+    train_batch = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    test_batch = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+
+    # パラメータ更新手法の定義
+    optimizer = op.Adagrad(network.parameters(), lr=0.01, lr_decay=0, weight_decay=0.05, initial_accumulator_value=0, eps=1e-10)
+
+    # 損失関数の定義
+    loss_func = nn.CrossEntropyLoss() # CrossEntropy誤差はone_hot_vectorに対応していない
+
+    network.train()
+    # 学習(エポック数3回 ⇒ パラメータは随時更新)
+    for i in range(1, epochs+1):
+        logging.info(f'===== START {i}th epoch !! =====')
+        for i, (data, label) in enumerate(train_batch):
+            optimizer.zero_grad()
+            output = network(data)
+            loss = loss_func(output, label)
+            loss.backward()
+            optimizer.step()
+            if i % 100 == 0:
+                logging.info(f'{i}th iteration ⇒ loss: {loss.item()}')
+
+
 
 
 
