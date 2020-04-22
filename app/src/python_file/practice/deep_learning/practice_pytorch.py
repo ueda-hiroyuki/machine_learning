@@ -1,4 +1,6 @@
+import os
 import logging
+import joblib
 import torch
 import torch.nn as nn
 import torch.optim as op
@@ -112,6 +114,7 @@ def train_nn_by_pytorch():
 
 
 def train_cnn_by_pytorch(): 
+    network_path = "src/sample_data/mnist/convolution_network.pkl"
     batch_size = 100
     num_classes = 10
     epochs = 3
@@ -122,7 +125,7 @@ def train_cnn_by_pytorch():
     # データのフォーマットを変換：PyTorchでの形式 = [画像数，チャネル数，高さ，幅]
     x_train = x_train.reshape(60000, 1, 28, 28)
     x_test = x_test.reshape(10000, 1, 28 ,28)
- 
+
     # PyTorchのテンソルに変換
     x_train = torch.Tensor(x_train).float()
     x_test = torch.Tensor(x_test).float()
@@ -142,19 +145,39 @@ def train_cnn_by_pytorch():
 
     # 損失関数の定義
     loss_func = nn.CrossEntropyLoss() # CrossEntropy誤差はone_hot_vectorに対応していない
+    if not os.path.exists(network_path):
+        network.train()
+        # 学習(エポック数3回 ⇒ パラメータは随時更新)
+        for i in range(1, epochs+1):
+            logging.info(f'===== START {i}th epoch !! =====')
+            for i, (data, label) in enumerate(train_batch):
+                optimizer.zero_grad()
+                output = network(data)
+                loss = loss_func(output, label)
+                loss.backward()
+                optimizer.step()
+                if i % 100 == 0:
+                    logging.info(f'{i}th iteration ⇒ loss: {loss.item()}')
+        joblib.dump(network, network_path)
+    else:
+        network = joblib.load(network_path) 
 
-    network.train()
-    # 学習(エポック数3回 ⇒ パラメータは随時更新)
-    for i in range(1, epochs+1):
-        logging.info(f'===== START {i}th epoch !! =====')
-        for i, (data, label) in enumerate(train_batch):
-            optimizer.zero_grad()
-            output = network(data)
-            loss = loss_func(output, label)
-            loss.backward()
-            optimizer.step()
-            if i % 100 == 0:
-                logging.info(f'{i}th iteration ⇒ loss: {loss.item()}')
+    # 評価
+    network.eval() # モデルを推論モードに変更
+    count = 0
+    for i, (data, label) in enumerate(test_batch):
+        test_output = network(data)
+        _, predicted = torch.max(test_output.data, 1)
+        y_predicted = predicted.numpy() # tensor型 ⇒ numpy.array型
+        label = label.numpy() # tensor型 ⇒ numpy.array型
+        cnt = np.sum(y_predicted == label)
+        count += cnt
+    accuracy = count / len(t_test) * 100
+    logging.info(f'========= Finaly accuracy is {accuracy} !! =========')
+
+        
+
+
 
 
 
