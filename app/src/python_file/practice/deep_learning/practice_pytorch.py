@@ -5,8 +5,12 @@ import torch.optim as op
 import torch.nn.functional as f
 import numpy as np
 import sklearn.preprocessing as sp
+from torch.utils.data import TensorDataset, DataLoader
+from collections import OrderedDict
 from sklearn import datasets
 from sklearn.model_selection import train_test_split
+from sample_data.deep_learning_documents.dataset.mnist import load_mnist
+
 
 logging.basicConfig(level=logging.INFO)
 
@@ -23,10 +27,38 @@ class ConvolutionalNeuralNetwork(nn.Module):
         # 親クラスとインスタンス自身をsuper()に渡す
         super(ConvolutionalNeuralNetwork, self).__init__() # 親クラスの継承(nn.Moduleのinit()を実行する)
 
-        # 畳込層+活性化関数+プーリング層+(バッチ正規化)を一塊にする
+        # 畳込層+活性化関数+プーリング層+(バッチ正規化)を一塊にする ⇒ Sequentialにはコンストラクタで渡された順番で順次追加されていく
         self.block1 = nn.Sequential(
-            nn.Cov2d
+            nn.Conv2d(in_channels=1, out_channels=16, kernel_size=3, padding=1), # 1枚の画像に対し、16個のフィルタ(チャンネル)を適応
+            nn.ReLU(inplace=True),
+            nn.Conv2d(in_channels=16, out_channels=16, kernel_size=3, padding=1), # 1枚の画像に対し、16個のフィルタ(チャンネル)を適応
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(kernel_size=2, stride=1),# 出力サイズ: チャネル=16, 高さ=27, 幅=27
+            nn.BatchNorm2d(16) # inputされるチャネルの数(N,C,H,W)
         )
+        self.block2 = nn.Sequential(
+            nn.Conv2d(in_channels=16, out_channels=32, kernel_size=3, padding=1), # 1枚の画像に対し、32個のフィルタ(チャンネル)を適応
+            nn.ReLU(inplace=True),
+            nn.Conv2d(in_channels=32, out_channels=32, kernel_size=3, padding=1), # 1枚の画像に対し、32個のフィルタ(チャンネル)を適応
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(kernel_size=2, stride=1), # 出力サイズ: チャネル=32, 高さ=26, 幅=26
+            nn.BatchNorm2d(32) # inputされるチャネルの数(N,C,H,W)
+        )
+        self.full_conn = nn.Sequential(
+            nn.Linear(in_features=32*26*26, out_features=512), # 全結合層⇒線形変換:y=x*w+b(in_featuresは直前の出力ユニット(ニューロン)数, out_featuresは出力のユニット(ニューロン)数)
+            nn.ReLU(),
+            nn.Dropout(),
+            nn.Linear(in_features=512, out_features=num_classes) # out_features:最終出力数(分類クラス数)
+        )
+
+    def forward(self, x):
+        x = self.block1(x)
+        x = self.block2(x)
+        print(x.shape)
+
+
+
+
 
 # input_size:1(n:4), hidden_size:2(n:10,8), output_size: 1(3)のシンプルなニューラルネットワーク
 class NeuralNetwork(nn.Module):
@@ -53,8 +85,8 @@ def train_nn_by_pytorch():
     x_train, x_test, y_train, y_test = train_test_split(iris.data, one_hot_label, test_size=0.25)
 
     # numpy.arrayをpytorchで扱える形に変換
-    x_train = torch.from_numpy(x_train).float()
-    y_train = torch.from_numpy(y_train).float()
+    x_train = torch.tensor(x_train, dtype=torch.float32) 
+    y_train = torch.tensor(y_train, dtype=torch.float32)
 
     network = NeuralNetwork()
     optimizer = op.SGD(network.parameters(), lr=0.01) # 更新手法の選択(SGD:確率的勾配降下法), parameters()はnn.Moduleのパラメータ
@@ -63,24 +95,48 @@ def train_nn_by_pytorch():
     # 3000イテレーション分回す
     for i in range(3000):
         logging.info(f'start {i}th iteration !!')
-        optimizer.zero_grad() # 保持している勾配パラメータ(誤差)の初期化
+        optimizer.zero_grad() # 保持している勾配パラメータ(誤差)の初期化 ⇒ 勾配がイテレーション毎に加算されてしまうため
         output = network(x_train) # nn.Moduleにはcall関数が定義されている(x_trainはcallの引数)
         loss = criterion(output, y_train) # 損失関数に出力値と教師データを引数として与える。
         loss.backward() # 勾配の計算(出力値-教師データ)
         optimizer.step() # パラメータの更新(勾配計算後に呼び出せる)
 
     # 評価
-    x_test = torch.from_numpy(x_test).float()
+    x_test = torch.tensor(x_test, dtype=torch.float32)
     test_output = network(x_test) # テストデータをforwardに通す(確率分布が返ってくる)
     _, predicted = torch.max(test_output.data, 1) # 行方向の最大indexを返す
     y_predicted = predicted.numpy() # tensor型 ⇒ numpy.array型
     y_test = np.argmax(y_test, axis=1)
     accuracy = np.sum(y_test == y_predicted) * 100 / len(y_test)
     logging.info(f'accuracy is [ {accuracy} % ]')
+    print(network)
+
+
+def train_cnn_by_pytorch():
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+ 
+    batch_size = 100
+    num_classes = 10
+    epochs = 3
+
+    (x_train, t_train), (x_test, t_test) = load_mnist(normalize=True, one_hot_label=True)
+    network = ConvolutionalNeuralNetwork(num_classes)
+    
+    # データのフォーマットを変換：PyTorchでの形式 = [画像数，チャネル数，高さ，幅]
+    x_train = x_train.reshape(60000, 1, 28, 28)
+    x_test = x_test.reshape(10000, 1, 28 ,28)
+ 
+    # PyTorchのテンソルに変換
+    x_train = torch.Tensor(x_train).float()
+    x_test = torch.Tensor(x_test).float()
+    t_train = torch.Tensor(t_train).float()
+    t_test = torch.Tensor(t_test).float()
+
+    x_train_ = DataLoader(t_train, batch_size=batch_size, shuffle=True)
 
 
 
     
 
 if __name__ == "__main__":
-    train_nn_by_pytorch()
+    train_cnn_by_pytorch()
