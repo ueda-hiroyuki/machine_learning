@@ -1,11 +1,14 @@
+import logging
 import torch
 import torch.nn as nn
 import torch.optim as op
 import torch.nn.functional as f
+import numpy as np
 import sklearn.preprocessing as sp
 from sklearn import datasets
 from sklearn.model_selection import train_test_split
 
+logging.basicConfig(level=logging.INFO)
 
 class ConvolutionalNeuralNetwork(nn.Module):
     def __init__(self, num_classes):
@@ -34,46 +37,47 @@ class NeuralNetwork(nn.Module):
         self.Affine2 = nn.Linear(10, 8)
         self.Affine3 = nn.Linear(8, 3)
 
-    # 順伝播
+    # 順伝播　
     def forward(self, x):
         out1 = f.relu(self.Affine1(x))
         out2 = f.relu(self.Affine2(out1))
         out3 = self.Affine3(out2)
-        print("####################x#####################")
-        print(x.shape)
-        print("####################out1#####################")
-        print(out1.shape)
-        print("#####################out2####################")
-        print(out2.shape)
-        print("######################out3###################")
-        print(out3.shape)
         return out3 
-
-    # 逆伝播
-    def backward(self, dout):
-        ...
 
 def train_nn_by_pytorch():
     iris = datasets.load_iris()
     label = iris.target.reshape(len(iris.target),1)
     # 1次元ラベルをone_hot_vectorに変換する
     one_hot_label = sp.OneHotEncoder(sparse=False).fit_transform(label)
-    # numpy.arrayをpytorchで扱える形に変換
-    iris_data = torch.from_numpy(iris.data).float()
     # 学習データとテストデータを分割する
-    x_train, x_test, y_train, y_test = train_test_split(iris_data, one_hot_label, test_size=0.25)
+    x_train, x_test, y_train, y_test = train_test_split(iris.data, one_hot_label, test_size=0.25)
+
+    # numpy.arrayをpytorchで扱える形に変換
+    x_train = torch.from_numpy(x_train).float()
+    y_train = torch.from_numpy(y_train).float()
 
     network = NeuralNetwork()
     optimizer = op.SGD(network.parameters(), lr=0.01) # 更新手法の選択(SGD:確率的勾配降下法), parameters()はnn.Moduleのパラメータ
-    loss = nn.MSELoss() # 損失関数の定義
+    criterion = nn.MSELoss() # 損失関数の定義(平均二乗誤差：二乗L2ノルム)
+    
     # 3000イテレーション分回す
-    for i in range(2):
-        optimizer.zero_grad() # 勾配パラメータを削除
-        output = network.forward(x_train)
+    for i in range(3000):
+        logging.info(f'start {i}th iteration !!')
+        optimizer.zero_grad() # 保持している勾配パラメータ(誤差)の初期化
+        output = network(x_train) # nn.Moduleにはcall関数が定義されている(x_trainはcallの引数)
+        loss = criterion(output, y_train) # 損失関数に出力値と教師データを引数として与える。
+        loss.backward() # 勾配の計算(出力値-教師データ)
+        optimizer.step() # パラメータの更新(勾配計算後に呼び出せる)
 
-        # loss = criterion(output, y)
-        # loss.backward()
-        # optimizer.step()
+    # 評価
+    x_test = torch.from_numpy(x_test).float()
+    test_output = network(x_test) # テストデータをforwardに通す(確率分布が返ってくる)
+    _, predicted = torch.max(test_output.data, 1) # 行方向の最大indexを返す
+    y_predicted = predicted.numpy() # tensor型 ⇒ numpy.array型
+    y_test = np.argmax(y_test, axis=1)
+    accuracy = np.sum(y_test == y_predicted) * 100 / len(y_test)
+    logging.info(f'accuracy is [ {accuracy} % ]')
+
 
 
     
