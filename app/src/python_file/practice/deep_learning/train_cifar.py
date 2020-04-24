@@ -26,22 +26,27 @@ IMAGE_LABELS = np.array([
     'truck'
 ])
 
+
+class AlexNet(nn.Module):
+    ...
+
+
 class LeNet(nn.Module): # LeNetは畳み込み層、プーリング層が各3層ずつの構造である
     def __init__(self, num_classes):
         super(LeNet, self).__init__()
         self.block = nn.Sequential(
-            nn.Conv2d(in_channel=3, out_channel=16, kernel_size=3, padding=1)
-            nn.ReLU(in_place=True),
+            nn.Conv2d(in_channels=3, out_channels=16, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=2),
             nn.BatchNorm2d(16),
-            nn.Conv2d(in_channel=16, out_channel=32, kernel_size=3, padding=1)
-            nn.ReLU(in_place=True),
+            nn.Conv2d(in_channels=16, out_channels=32, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=2),
-            nn.BatchNorm2d(32)
-            nn.Conv2d(in_channel=32, out_channel=64, kernel_size=3, padding=1)
-            nn.ReLU(in_place=True),
+            nn.BatchNorm2d(32),
+            nn.Conv2d(in_channels=32, out_channels=64, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=2),
-            nn.BatchNorm2d(64)
+            nn.BatchNorm2d(64),
         )
         self.full_conn = nn.Sequential(
             nn.Linear(in_features=64*4*4, out_features=500), # 全結合層⇒線形変換:y=x*w+b(in_featuresは直前の出力ユニット(ニューロン)数, out_featuresは出力のユニット(ニューロン)数)
@@ -49,6 +54,18 @@ class LeNet(nn.Module): # LeNetは畳み込み層、プーリング層が各3層
             nn.Dropout(),
             nn.Linear(in_features=500, out_features=num_classes) # out_features:最終出力数(分類クラス数)
         )
+        self.full_conn.apply(init_weights)
+
+    def forward(self, x):
+        x = self.block(x)
+        x = x.view(x.size(0), 64 * 4 * 4)
+        out = self.full_conn(x)
+        return out
+
+def init_weights(m):
+    if type(m) == nn.Linear:
+        torch.nn.init.xavier_uniform(m.weight)
+        m.bias.data.fill_(0.01)
 
 
 def show_cifer(data, classes, path):
@@ -69,9 +86,10 @@ def show_cifer(data, classes, path):
 
 
 def train_cifar_by_cnn():
+    network_path = "src/sample_data/cifar/convolution_network.pkl"
     path = "src/sample_data/cifar"
     batch_size = 100
-    epoch = 5
+    epochs = 50
     num_classes = 10
 
     # torchvisionのtransformsには画像変換系の関数が入っている。
@@ -86,7 +104,78 @@ def train_cifar_by_cnn():
     test_batch = torch.utils.data.DataLoader(test_dataset, batch_size=batch_size,shuffle=False, num_workers=2)
     
     # show_cifer(test_batch, IMAGE_LABELS, f'{path}/cifar_img2.png')
-    network = LeNet()
+    network = LeNet(num_classes)
+    optimizer = op.Adagrad(network.parameters(), lr=0.01)
+    loss_func = nn.CrossEntropyLoss()
+
+    train_acc_list = []
+    test_acc_list = []
+
+    # 学習
+    if not os.path.exists(network_path):
+        network.train()
+        for epoch in range(1, epochs+1):
+            logging.info(f'===== START {epoch}th epoch !! =====')
+            count_train = 0
+            for i, (data, label) in enumerate(train_batch):
+                optimizer.zero_grad()
+                output = network(data)
+                loss = loss_func(output, label)
+                loss.backward()
+                optimizer.step()
+                _, predicted = torch.max(output, axis=1)
+                predicted, label = predicted.numpy(), label.numpy()
+                cnt_train = np.sum(predicted == label)
+                count_train += cnt_train
+                if i % 100 == 0:
+                    logging.info(f'{i}th iteration ⇒ loss: {loss.item()}')
+            train_accuracy = count_train / len(train_dataset) * 100
+            train_acc_list.append(train_accuracy) 
+
+            count_test = 0
+            for i, (data, label) in enumerate(test_batch):
+                test_output = network(data)
+                _, predicted = torch.max(test_output, axis=1)
+                predicted, label = predicted.numpy(), label.numpy()
+                cnt_test = np.sum(predicted == label)
+                count_test += cnt_test
+            test_accuracy = count_test / len(test_dataset) * 100
+            test_acc_list.append(test_accuracy)    
+        joblib.dump(network, network_path)
+    else:
+        network = joblib.load(network_path) 
+
+
+    # 評価
+    network.eval()
+    count = 0
+    for i, (data, label) in enumerate(test_batch):
+        test_output = network(data)
+        _, predicted = torch.max(test_output, axis=1)
+        predicted, label = predicted.numpy(), label.numpy()
+        cnt = np.sum(predicted == label)
+        count += cnt
+    final_accuracy = count / len(test_dataset) * 100
+    logging.info(f'========= Finaly accuracy is {final_accuracy} !! =========')
+    accu_dict = {
+        "epoch": range(1, epochs+1),
+        "train": train_acc_list,
+        "test": test_acc_list,
+    }
+    plt.figure()
+    x = accu_dict['epoch']
+    y = accu_dict['train']
+    plt.plot(x, y, label='train')
+    
+    y = accu_dict['test']
+    plt.plot(x, y, label='test')
+    plt.legend()
+    
+    plt.xlabel('epoch')
+    plt.ylabel('accuracy')
+    plt.xlim(0, epochs)
+    plt.ylim(0, 100)
+    plt.savefig(f'{path}/accuracy_gragh.png')
 
 
 if __name__ == "__main__":
