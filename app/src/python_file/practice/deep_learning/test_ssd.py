@@ -9,6 +9,8 @@ from glob import glob
 from sample_data.pytorch_handbook.chapter7.ssd import build_ssd
 from matplotlib import pyplot as plt
 
+# 学習済みモデルの使用(SSD：物体検出)
+
 WEIGHT_PATH = 'src/sample_data/pytorch_handbook/chapter7/weights/ssd300_mAP_77.43_v2.pth'
 IMAGES_PATH = 'src/sample_data/images/*.jpg'
 VOC_CLASSES = (  # always index 0
