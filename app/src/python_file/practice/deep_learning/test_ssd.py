@@ -2,12 +2,13 @@ import numpy as np
 import cv2
 import torch
 import torch.nn as nn
+import matplotlib.pyplot as plt
 from torchvision import datasets, transforms
 from torch.autograd import Variable
 from PIL import Image
 from glob import glob
 from sample_data.pytorch_handbook.chapter7.ssd import build_ssd
-from matplotlib import pyplot as plt
+
 
 # 学習済みモデルの使用(SSD：物体検出)
 
@@ -57,8 +58,8 @@ def detect(network, image, count):
             currentAxis.add_patch(plt.Rectangle(*coords, fill=False, edgecolor=color, linewidth=2))
             currentAxis.text(pt[0], pt[1], display_txt, bbox={'facecolor':color, 'alpha':0.5})
             j+=1
-    # plt.savefig(f'src/sample_data/images/detected_image{count}.jpg')
-    # plt.close()
+    plt.savefig(f'src/sample_data/images/detected_image{count}.jpg')
+    plt.close()
     
     
 def test_ssd():    

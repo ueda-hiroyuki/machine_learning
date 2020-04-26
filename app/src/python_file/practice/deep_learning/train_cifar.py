@@ -28,10 +28,6 @@ IMAGE_LABELS = np.array([
 ])
 
 
-class AlexNet(nn.Module):
-    ...
-
-
 class LeNet(nn.Module): # LeNetは畳み込み層、プーリング層が各3層ずつの構造である
     def __init__(self, num_classes):
         super(LeNet, self).__init__()
