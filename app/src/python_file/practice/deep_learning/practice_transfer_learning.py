@@ -77,7 +77,7 @@ def run_detect(image_path):
     print(f'{detection}の写真です!')
 
 
-def imshow(input, title):
+def imshow(input, title="images"):
     print(input.shape)
     input = input.numpy().transpose((1, 2, 0))
     # 正規化(transforms.Normalize)の逆処理
@@ -138,6 +138,7 @@ def fine_turning():
 def transfer_learning():
     batch_size = 10
     train_data, train_batch, val_data, val_batch = load_data(batch_size, data_dir)
+    classes = train_data.classes
     pretrained_model = models.resnet18(pretrained=True)
     for param in pretrained_model.parameters():
         # requires_grad = False とすることで事前学習モデルのすべての層の重みパラメータを固定し、これ以上学習を進めないことを明示する
@@ -152,33 +153,43 @@ def transfer_learning():
     optimizer = op.SGD(pretrained_model.fc.parameters(), lr=0.001, momentum=0.9)
     scheduler = op.lr_scheduler.StepLR(optimizer, step_size=7, gamma=0.1)
 
-    model = train_model(train_batch, pretrained_model, criterion, optimizer, scheduler, 5)
-    visualize_model(model, val_batch)
+    model = train_model(train_batch, pretrained_model, criterion, optimizer, scheduler, 1)
+    visualize_model(model=model, val_batch=val_batch, classes=classes)
 
-def visualize_model(model, num_images=10):
-    class_index = json.load(open('src/sample_data/Image-Classifier/data/imagenet_class_index.json', 'r'))
+def visualize_model(model, val_batch, classes, num_images=10):
     was_training = model.training
     model.eval()
     images_so_far = 0
     fig = plt.figure()
+
+    inputs, labels = next(iter(val_batch))
+    outputs = model(inputs)
+    _, preds = torch.max(outputs, 1)
+    preds = preds.numpy()
+
+    for j in range(inputs.size()[0]):
+        images_so_far += 1
+        ax = plt.subplot(num_images/2, 2, images_so_far)
+        ax.axis('off')
+        ax.set_title(f'predicted: {classes[preds[j]]}')
+        imshow(inputs.cpu().data[j],title=classes[preds[j]])
+    plt.savefig(f'src/sample_data/images/samples/predicted_hymenoptera.jpg') 
+    model.train(mode=was_training)
+    
+    # with torch.no_grad():
+    #     for i, (inputs, labels) in enumerate(val_batch):
+    #         outputs = model(inputs)
+    #         _, preds = torch.max(outputs, 1)
+    #         preds = preds.numpy()
  
-    with torch.no_grad():
-        for i, (inputs, labels) in enumerate(val_batch):
-            outputs = model(inputs)
-            _, preds = torch.max(outputs, 1)
- 
-            for j in range(inputs.size()[0]):
-                images_so_far += 1
-                ax = plt.subplot(num_images//2, 2, images_so_far)
-                ax.axis('off')
-                ax.set_title('predicted: {}'.format(class_index[preds[j]]))
-                plt.savefig(f'src/sample_data/images/samples/predicted_hymenoptera{j}.jpg')
- 
-                if images_so_far == num_images:
-                    model.train(mode=was_training)
-                    return
-        model.train(mode=was_training)
- 
+    #         for j in range(inputs.size()[0]):
+    #             images_so_far += 1
+    #             ax = plt.subplot(num_images/2, 2, images_so_far)
+    #             ax.axis('off')
+    #             ax.set_title(f'predicted: {classes[preds[j]]}')
+    #     plt.savefig(f'src/sample_data/images/samples/predicted_hymenoptera.jpg') 
+    #     model.train(mode=was_training)
+    
 
 
 if __name__ == "__main__":
