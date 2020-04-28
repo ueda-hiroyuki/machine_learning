@@ -25,7 +25,7 @@ logging.basicConfig(level=logging.INFO)
 
 """
 
-weight_path = "src/sample_data/pytorch_handbook/chapter7/weights/"
+weight_dir = "src/sample_data/pytorch_handbook/chapter7/weights/"
 args = {'dataset':'BCCD',  # VOC → BCCD
     'basenet':'vgg16_reducedfc.pth',
     'batch_size':8,
@@ -37,7 +37,7 @@ args = {'dataset':'BCCD',  # VOC → BCCD
     'momentum':0.9,
     'weight_decay':5e-4,
     'gamma':0.1,
-    'save_folder': weight_path
+    'save_folder': weight_dir
     }
 
 # 学習率の調整
@@ -68,7 +68,6 @@ def train(cfg, network, dataset, optimizer, criterion):
 
     batch_iterator = None
     for iteration in range(args["start_iter"], cfg["max_iter"]+1):
-        logging.info(f'start {iteration}th iteration !!')
         if (not batch_iterator) or (iteration % epoch_size ==0):
             batch_iterator = iter(dataset)
             loc_loss = 0
@@ -91,7 +90,9 @@ def train(cfg, network, dataset, optimizer, criterion):
         optimizer.step()
         loc_loss += loss_l.item()
         conf_loss += loss_c.item()
-        logging.info(f"Loss : {loss.item()}")
+        logging.info(f"Finished {iteration}th iteration and Loss : {loss.item()}")
+    # 学習済みモデルの保存
+    torch.save(network.state_dict(), f'{weight_dir}/BCCD_param.pth')
         
         
 def main():
