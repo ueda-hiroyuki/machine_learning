@@ -28,7 +28,7 @@ logging.basicConfig(level=logging.INFO)
 weight_dir = "src/sample_data/pytorch_handbook/chapter7/weights/"
 args = {'dataset':'BCCD',  # VOC → BCCD
     'basenet':'vgg16_reducedfc.pth',
-    'batch_size':8,
+    'batch_size':10,
     'resume':'',
     'start_iter':0,
     'num_workers':0,  # 4 → 0
@@ -57,7 +57,7 @@ def weights_init(m):
         m.bias.data.zero_()
 
 
-def train(cfg, network, dataset, optimizer, criterion):
+def train(cfg, network, dataset, optimizer, criterion, scheduler):
     network.train()
     # loss counters
     loc_loss = 0
@@ -88,6 +88,7 @@ def train(cfg, network, dataset, optimizer, criterion):
         loss = loss_l + loss_c
         loss.backward()
         optimizer.step()
+        #scheduler.step()
         loc_loss += loss_l.item()
         conf_loss += loss_c.item()
         logging.info(f"Finished {iteration}th iteration and Loss : {loss.item()}")
@@ -124,6 +125,8 @@ def main():
     # 損失関数の設定
     criterion = MultiBoxLoss(cfg['num_classes'], 0.5, True, 0, True, 3, 0.5, False)
 
+    scheduler = op.lr_scheduler.StepLR(optimizer, step_size=100, gamma=0.5)
+
     data_loader = DataLoader(
         dataset, 
         batch_size=args["batch_size"], 
@@ -132,7 +135,7 @@ def main():
         collate_fn=detection_collate, # サンプルのリストをマージして、Tensorのミニバッチを形成。マップスタイルのデータセットから一括読み込み時使用。
         pin_memory=True
     )
-    model = train(cfg, network, data_loader, optimizer, criterion) 
+    model = train(cfg, network, data_loader, optimizer, criterion, scheduler) 
 
 
  
