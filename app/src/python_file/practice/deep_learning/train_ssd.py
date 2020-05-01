@@ -26,6 +26,7 @@ logging.basicConfig(level=logging.INFO)
 """
 
 weight_dir = "src/sample_data/pytorch_handbook/chapter7/weights/"
+save_dir = "src/sample_data/images/BCCD"
 args = {'dataset':'BCCD',  # VOC → BCCD
     'basenet':'vgg16_reducedfc.pth',
     'batch_size':10,
@@ -96,7 +97,7 @@ def train(cfg, network, dataset, optimizer, criterion, scheduler):
     torch.save(network.state_dict(), f'{weight_dir}/BCCD_param.pth')
         
         
-def main():
+def exec_train():
     # 訓練データセットの呼び出し
     cfg = voc
     dataset = VOCDetection(root=VOC_ROOT,transform=SSDAugmentation(cfg['min_dim'],MEANS))
@@ -137,8 +138,58 @@ def main():
     )
     model = train(cfg, network, data_loader, optimizer, criterion, scheduler) 
 
+# 学習させた情報(BCCD_param.pth)を用いて評価を行う
+def exec_eval():
+    network = build_ssd("test", 300, 21)
+    network.load_weights(f"{weight_dir}/BCCD_param.pth")
+
+    # BCCD_testの読み込み
+    test_set = VOCDetection(VOC_ROOT, [('BCCD', 'test')], None, VOCAnnotationTransform())
+    
+    for img_num in range(len(test_set)):
+        # indexから画像を取得する
+        img_id = img_num 
+        image = test_set.pull_image(img_id)
+        # 画像の色彩を変換
+        rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        x = cv2.resize(image, (300, 300)).astype(np.float32) # 画像を300*300にリサイズ
+        input = torch.tensor(x.transpose(2,0,1)).unsqueeze(0) 
+
+        # 画像の描画
+        plt.figure()
+        plt.imshow(rgb_image)
+        colors = plt.cm.hsv(np.linspace(0, 1, 21)).tolist() # カラーセット
+
+        # 順伝播の実行⇒detectionに推論結果を格納
+        output = network(input)
+        detection = output.data
+
+        scale = torch.Tensor(rgb_image.shape[1::-1]).repeat(2)
+        currentAxis = plt.gca() # gca: get current axis ⇒ 大きい画像内に小さい画像を入れたりするときに役立つ
+
+
+        for i in range(detection.size(1)):
+            j = 0
+            # 確信度confが0.6以上のボックスを表示
+            # jは確信度上位200件のボックスのインデックス
+            # detections[0,i,j]は[conf,xmin,ymin,xmax,ymax]の形状
+            while detection[0,i,j,0] >= 0.6:
+                score = detection[0,i,j,0].numpy()
+                label_name = VOC_CLASSES[i-1]
+                text = f"{label_name}: {round(float(score), 2)}"
+                pt = (detection[0,i,j,1:]*scale).numpy() # バウンディングボックスの座標
+                coords = (pt[0], pt[1]), pt[2]-pt[0]+1, pt[3]-pt[1]+1
+                color = colors[i]
+                currentAxis.add_patch(plt.Rectangle(*coords, fill=False, edgecolor=color, linewidth=2)) # 指定した位置に矩形を挿入する
+                currentAxis.text(pt[0], pt[1], text, bbox={'facecolor':color, 'alpha':0.5}) # 矩形上に推論したクラス名を挿入する
+                j += 1
+
+        plt.savefig(f'{save_dir}/detected_image{img_num}.jpg')
+
+
+
 
  
 
 if __name__ == "__main__":
-    main() 
+    exec_eval() 
