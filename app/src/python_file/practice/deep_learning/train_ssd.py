@@ -187,9 +187,5 @@ def exec_eval():
         plt.savefig(f'{save_dir}/detected_image{img_num}.jpg')
 
 
-
-
- 
-
 if __name__ == "__main__":
     exec_eval() 
