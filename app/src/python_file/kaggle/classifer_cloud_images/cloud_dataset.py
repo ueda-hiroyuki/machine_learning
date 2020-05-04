@@ -10,6 +10,7 @@ from PIL import Image
 from glob import glob
 from catalyst import dl # pytorch用のフレームワークの１つ
 from torch.utils.data import TensorDataset, DataLoader, Dataset
+from torchvision import datasets, transforms, models
 from python_file.kaggle.classifer_cloud_images.functions import *
 from sklearn.model_selection import train_test_split
 
@@ -30,7 +31,7 @@ class CloudDataset(Dataset):
         df: pd.DataFrame = None, 
         datatype: str = "train", 
         img_ids:np.array = None, 
-        transforms = albu.Compose([albu.HorizontalFlip(),AT.ToTensor()]),
+        transforms = albu.Compose([albu.HorizontalFlip(),transforms.ToTensor()]),
         preprocessing = None,    
     ):
         self.df = df
@@ -51,4 +52,12 @@ class CloudDataset(Dataset):
         image_path = f"{self.data_folder}/{image_name}"
         img = cv2.imread(image_path)
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        augmented = self.transforms(img, mask)
+        img = augmented['image']
+        mask = augmented['mask']
+        if self.preprocessing:
+            preprocessed = self.preprocessing(image=img, mask=mask)
+            img = preprocessed['image']
+            mask = preprocessed['mask']
+        return img, mask
          
