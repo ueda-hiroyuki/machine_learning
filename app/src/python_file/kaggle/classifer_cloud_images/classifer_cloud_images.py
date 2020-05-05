@@ -127,7 +127,7 @@ def main():
         loaders=loaders,
         callbacks=[
             CheckpointCallback(
-                resume=f"{logdir}/checkpoints/best.pth"),
+                resume=f"{LOG_DIR}/checkpoints/best.pth"),
             InferCallback()
         ],
     )

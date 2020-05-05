@@ -8,7 +8,6 @@ import matplotlib.pyplot as plt
 from scipy import stats
 from sklearn.preprocessing import LabelEncoder
 
-
 def reduce_mem_usage(df, verbose=True):
     numerics = ['int16', 'int32', 'int64', 'float16', 'float32', 'float64']
     start_mem = df.memory_usage().sum() / 1024**2    
@@ -40,10 +39,11 @@ def reduce_mem_usage(df, verbose=True):
 
 
 def check_corr(df: pd.DataFrame, f_name: str) -> None:
-    corr = df.corr()
-    plt.figure(figsize=(30,30))
+    corr = df.corr().round(2)
+    print(corr)
+    plt.figure(figsize=(50,50))
     sns.heatmap(corr, square=True, annot=True)
-    plt.savefig(f'src/sample_data/Kaggle/kaggle_dataset/{f_name}/corr_heatmap.png')
+    plt.savefig(f'src/sample_data/Kaggle/{f_name}/corr_heatmap.png')
 
 
 def check_fig(df: pd.DataFrame, f_name: str) -> pd.DataFrame:
