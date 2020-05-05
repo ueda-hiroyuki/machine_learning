@@ -1,11 +1,14 @@
 import os
 import logging
 import random
+import cv2
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import albumentations as albu
 from PIL import Image
 from glob import glob
+
 
 
 def get_img(x, folder: str='train_images'):
@@ -41,7 +44,7 @@ def make_mask(df: pd.DataFrame, image_name: str='img.jpg', shape: tuple = (1400,
     """
     Create mask based on df, image name and shape.
     """
-    encoded_masks = df.loc[df['im_id'] == image_name, 'EncodedPixels']
+    encoded_masks = df.loc[df['img_id'] == image_name, 'EncodedPixels']
     masks = np.zeros((shape[0], shape[1], 4), dtype=np.float32)
 
     for idx, label in enumerate(encoded_masks.values):

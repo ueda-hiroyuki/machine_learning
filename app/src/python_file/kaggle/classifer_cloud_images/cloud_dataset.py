@@ -1,6 +1,7 @@
 import os
 import logging
 import random
+import cv2
 import numpy as np
 import pandas as pd
 import albumentations as albu # 画像データ拡張ライブラリ
@@ -47,12 +48,12 @@ class CloudDataset(Dataset):
         return len(self.img_ids)
 
     def __getitem__(self, idx):
-        image_name = img_ids[idx]
+        image_name = self.img_ids[idx]
         mask = make_mask(self.df, image_name)
         image_path = f"{self.data_folder}/{image_name}"
         img = cv2.imread(image_path)
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        augmented = self.transforms(img, mask)
+        augmented = self.transforms(image=img, mask=mask)
         img = augmented['image']
         mask = augmented['mask']
         if self.preprocessing:
