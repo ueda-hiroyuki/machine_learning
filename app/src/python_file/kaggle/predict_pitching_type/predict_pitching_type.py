@@ -37,7 +37,7 @@ TRAIN_PLAYER_PATH = f"{DATA_DIR}/train_player.csv"
 TEST_PITCH_PATH = f"{DATA_DIR}/test_pitch.csv"
 TEST_PLAYER_PATH = f"{DATA_DIR}/test_player.csv"
 SUBMISSION_PATH = f"{DATA_DIR}/sample_submit_ball_type.csv"
-REMOVAL_COLUMNS = ["社会人","ドラフト年","ドラフト種別","ドラフト順位", "投球位置区域"]
+REMOVAL_COLUMNS = ["試合内連番", "イニング", "成績対象打者ID", "成績対象投手ID", "チームID", "打者試合内打席数", "試合ID", "社会人","ドラフト年","ドラフト種別","ドラフト順位", "投球位置区域"]
 
 
 def remove_columns(df):
