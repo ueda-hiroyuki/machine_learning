@@ -5,11 +5,14 @@ import numpy as np
 import lightgbm as lgb
 import typing as t
 import seaborn as sns
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 from python_file.kaggle.common import common_funcs as cf
 from sklearn.model_selection import train_test_split, KFold, GridSearchCV, RandomizedSearchCV
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, LabelEncoder
 from sklearn.metrics import mean_squared_error
+import matplotlib.font_manager
+
 
 """
 train_pitch(51 columns)
@@ -24,7 +27,8 @@ test_player(25 columns)
 ・submission.csvに記載する情報は「test_pitchのデータ連番」「各球種(8種)の投球確率」
 
 """
-
+# mpl.font_manager._rebuild()
+# sns.set(font=['IPAMincho'])
 logging.basicConfig(level=logging.INFO)
 
 DATA_DIR = "src/sample_data/Kaggle/predict_pitching_type"
@@ -33,12 +37,12 @@ TRAIN_PLAYER_PATH = f"{DATA_DIR}/train_player.csv"
 TEST_PITCH_PATH = f"{DATA_DIR}/test_pitch.csv"
 TEST_PLAYER_PATH = f"{DATA_DIR}/test_player.csv"
 SUBMISSION_PATH = f"{DATA_DIR}/sample_submit_ball_type.csv"
+REMOVAL_COLUMNS = ["社会人","ドラフト年","ドラフト種別","ドラフト順位", "投球位置区域"]
 
 
 def remove_columns(df):
-    df = df.drop(["社会人","ドラフト年","ドラフト種別","ドラフト順位", "投球位置区域"], axis=1).fillna(0)
+    df = df.drop(REMOVAL_COLUMNS, axis=1).fillna(0)
     return df
-
 
 
 def main():
@@ -66,6 +70,11 @@ def main():
     ).drop(['選手ID'], axis=1)
     train_data = remove_columns(train_data)
     cf.check_corr(train_data, "predict_pitching_type")
+    print("####################")
+    print(train_data.columns)
+    print(train_data)
+    print("####################")
+
 
 
 if __name__ == "__main__":

@@ -40,7 +40,6 @@ def reduce_mem_usage(df, verbose=True):
 
 def check_corr(df: pd.DataFrame, f_name: str) -> None:
     corr = df.corr().round(2)
-    print(corr)
     plt.figure(figsize=(50,50))
     sns.heatmap(corr, square=True, annot=True)
     plt.savefig(f'src/sample_data/Kaggle/{f_name}/corr_heatmap.png')
