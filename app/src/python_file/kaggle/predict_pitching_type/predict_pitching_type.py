@@ -61,7 +61,6 @@ def main():
     print(player_data["選手ID"].value_counts())
 
 
-
     # pitchers = train_player[train_player["位置"] == "投手"]
     
     # train_data = pd.merge(
