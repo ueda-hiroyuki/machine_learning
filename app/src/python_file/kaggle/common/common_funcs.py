@@ -7,6 +7,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 from scipy import stats
 from sklearn.preprocessing import LabelEncoder
+from sklearn.preprocessing import StandardScaler, MinMaxScaler
 
 def reduce_mem_usage(df, verbose=True):
     numerics = ['int16', 'int32', 'int64', 'float16', 'float32', 'float64']
@@ -52,7 +53,18 @@ def check_fig(df: pd.DataFrame, f_name: str) -> pd.DataFrame:
         plt.savefig(f'src/sample_data/Kaggle/kaggle_dataset/{f_name}/{name}.png')
 
 
-def label_encorder(df: pd.DataFrame, cols: t.Sequence[str]) -> pd.DataFrame:
+def label_encorder(df: pd.DataFrame) -> pd.DataFrame:
+    for col_name, col in df.iteritems():
+        col = col.fillna(col.mode()[0])
+        if col.dtypes == "object":
+            le = LabelEncoder()
+            le.fit(col)
+            df[col_name] = le.transform(col)
+        else:
+            df[col_name] = col
+    return df
+
+
     for col in cols:
         series = df[col]
         le = LabelEncoder()
@@ -66,3 +78,16 @@ def remove_outlier(df: pd.DataFrame, sigma: int) -> pd.DataFrame:
         z = stats.zscore(series) < sigma
         df[name] = column[z]
     return df
+
+
+def standardize(df: pd.DataFrame) -> pd.DataFrame:
+    scaler = StandardScaler()
+    scaler.fit(df)
+    scaler_df = pd.DataFrame(scaler.transform(df), columns=df.columns)
+    return scaler_df
+
+def minmaxscaler(df: pd.DataFrame) -> pd.DataFrame:
+    mm = MinMaxScaler()
+    mm.fit(df)
+    mm_df = pd.DataFrame(mm.transform(df), columns=df.columns)
+    return mm_df
