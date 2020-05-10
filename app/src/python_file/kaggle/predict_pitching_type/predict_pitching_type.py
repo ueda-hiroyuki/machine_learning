@@ -1,5 +1,6 @@
 import gc
 import logging
+import typing as t
 import pandas as pd
 import numpy as np
 import lightgbm as lgb
@@ -10,8 +11,7 @@ import matplotlib.pyplot as plt
 from python_file.kaggle.common import common_funcs as cf
 from sklearn.model_selection import train_test_split, KFold, StratifiedKFold, GridSearchCV, RandomizedSearchCV
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, LabelEncoder, OneHotEncoder
-from sklearn.metrics import mean_squared_error
-import matplotlib.font_manager
+from sklearn.metrics import mean_squared_error, r2_score
 
 
 """
@@ -55,6 +55,74 @@ def label_encorder(col: pd.Series) -> pd.DataFrame:
         return col
 
 
+def get_best_params(train_x: t.Any, train_y: t.Any, num_class: int) -> t.Any:
+    best_params = {}
+    gbm = lgb.LGBMClassifier(
+        objective="multiclass",
+        boosting_type= 'gbdt', 
+    )
+    grid_params = {
+        'learning_rate': [0.2, 0.5],
+        'n_estimators': [50, 100],
+        'min_data_in_leaf': [10, 100, 1000],
+        'num_leaves': [20, 40],
+        'num_iterations' : [100, 200, 500],
+        'feature_fraction' : [0.7],
+        'max_depth' : [5, 10, 20]
+    }
+    # grid_params = {
+    #     'learning_rate': [0.2],
+    #     'n_estimators': [50],
+    #     'num_leaves': [20],
+    #     'num_iterations' : [5],
+    #     'feature_fraction' : [0.7],
+    #     'max_depth' : [5]
+    # }
+    grid_search = GridSearchCV(
+        gbm, # 分類器,
+        param_grid=grid_params, # 試したいパラメータの渡し方
+        cv=5, # 5分割交差検証
+    )
+    grid_search.fit(
+        train_x,
+        train_y,
+    )
+    print("#################################")
+    print(grid_search.best_score_)
+    print(grid_search.best_params_) 
+    print("#################################")
+    
+    best_params['learning_rate'] = grid_search.best_params_['learning_rate']
+    best_params['min_data_in_leaf'] = grid_search.best_params_['min_data_in_leaf']
+    best_params['n_estimators'] = grid_search.best_params_['n_estimators']
+    best_params['num_leaves'] = grid_search.best_params_['num_leaves']
+    best_params['num_iterations'] = grid_search.best_params_['num_iterations']
+    best_params['feature_fraction'] = grid_search.best_params_['feature_fraction']
+    best_params['max_depth'] = grid_search.best_params_['max_depth']
+    best_params["objective"] = 'multiclass'
+    best_params["boosting_type"] = 'gbdt'
+    best_params["metric"] = 'multi_logloss'
+    best_params['num_class'] = num_class
+    return best_params
+
+def get_model(tr_dataset: t.Any, val_dataset: t.Any, params: t.Dict[str, t.Any]) -> t.Any:
+    model = lgb.train(
+        params=params,
+        train_set=tr_dataset,
+        valid_sets=val_dataset,
+        early_stopping_rounds=5,
+    )
+    return model
+
+def gen_r2_score_fig(score_list, n_splits, save_dir):
+    plt.figure()
+    plt.plot(range(1, n_splits+1), marker='o')
+    plt.xlabel("epochs")
+    plt.ylabel("r2_score")
+    plt.xlim(0, n_splits+1)
+    plt.savefig(f"{save_dir}/r2_score.png")
+
+
 def main():
     train_pitch = pd.read_csv(TRAIN_PITCH_PATH)
     train_player = pd.read_csv(TRAIN_PLAYER_PATH)
@@ -79,7 +147,7 @@ def main():
     use = merged_data.loc[:, "use"]
     merged_data = merged_data.drop(["use"], axis=1)
     encorded_data = cf.label_encorder(merged_data)
-    encorded_data = cf.standardize(encorded_data) # 標準化
+    # encorded_data = cf.standardize(encorded_data) # 標準化
     encorded_data = pd.concat([encorded_data, use], axis=1)
  
     train = encorded_data[encorded_data["use"] == "train"].drop("use", axis=1)
@@ -89,8 +157,31 @@ def main():
     train_y = train.loc[:,"球種"]
     test_x = test.drop("球種", axis=1).reset_index(drop=True)
 
-    print(train_x, train_y, test_x)
-  
+    n_splits = 3
+    num_class = 8
+    best_params = get_best_params(train_x, train_y, num_class) # 最適ハイパーパラメータの探索
+    submission = np.zeros((len(test_x),num_class))
+
+    kf = KFold(n_splits=n_splits, shuffle=True, random_state=0)
+    for tr_idx, val_idx in kf.split(train_x, train_y):
+        tr_x = train_x.iloc[tr_idx].reset_index(drop=True)
+        tr_y = train_y.iloc[tr_idx].reset_index(drop=True)
+        val_x = train_x.iloc[val_idx].reset_index(drop=True)
+        val_y = train_y.iloc[val_idx].reset_index(drop=True)
+
+        tr_dataset = lgb.Dataset(tr_x, tr_y)
+        val_dataset = lgb.Dataset(val_x, val_y, reference=tr_dataset)
+        model = get_model(tr_dataset, val_dataset, best_params)
+        y_pred = model.predict(test_x, num_iteration=model.best_iteration)
+        submission += y_pred
+
+    submission_df = pd.DataFrame(submission/n_splits)
+    print("#################################")
+    print(submission_df)
+    print(best_params) 
+    print("#################################")
+    
+    submission_df.to_csv(f"{DATA_DIR}/my_submission.csv", header=False)
 
 
 if __name__ == "__main__":
