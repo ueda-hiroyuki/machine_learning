@@ -60,21 +60,23 @@ def get_best_params(train_x: t.Any, train_y: t.Any, num_class: int) -> t.Any:
     gbm = lgb.LGBMClassifier(
         objective="multiclass",
         boosting_type= 'gbdt', 
+        #n_jobs=4
     )
     grid_params = {
-        'learning_rate': [0.2, 0.5],
+        'learning_rate': [0.1, 0.2],
         'n_estimators': [50, 100],
-        'min_data_in_leaf': [10, 100, 1000],
-        'num_leaves': [20, 40],
-        'num_iterations' : [100, 200, 500],
+        'min_data_in_leaf': [1000],
+        'num_leaves': [10, 20],
+        'num_iterations' : [100],
         'feature_fraction' : [0.7],
-        'max_depth' : [5, 10, 20]
+        'max_depth' : [10]
     }
     # grid_params = {
     #     'learning_rate': [0.2],
     #     'n_estimators': [50],
     #     'num_leaves': [20],
     #     'num_iterations' : [5],
+    #     'min_data_in_leaf': [1000],
     #     'feature_fraction' : [0.7],
     #     'max_depth' : [5]
     # }
@@ -157,11 +159,24 @@ def main():
     train_y = train.loc[:,"球種"]
     test_x = test.drop("球種", axis=1).reset_index(drop=True)
 
-    n_splits = 3
+    n_splits = 5
     num_class = 8
     best_params = get_best_params(train_x, train_y, num_class) # 最適ハイパーパラメータの探索
+    # best_params = {
+    #     'objective': 'multiclass',
+    #     'boosting_type': 'gbdt',
+    #     'metric': 'multi_logloss',
+    #     'num_class': 8
+    #     'learning_rate': [0.2, 0.5],
+    #     'n_estimators': [50, 100],
+    #     'min_data_in_leaf': [10, 100, 1000],
+    #     'num_leaves': [20, 40],
+    #     'num_iterations' : [100, 200, 500],
+    #     'feature_fraction' : [0.7],
+    #     'max_depth' : [5, 10, 20]
+    # }
     submission = np.zeros((len(test_x),num_class))
-
+    importances = pd.DataFrame(np.zeros(len(test_x.columns)), index=test_x.columns, columns=['importance'])
     kf = KFold(n_splits=n_splits, shuffle=True, random_state=0)
     for tr_idx, val_idx in kf.split(train_x, train_y):
         tr_x = train_x.iloc[tr_idx].reset_index(drop=True)
@@ -174,11 +189,15 @@ def main():
         model = get_model(tr_dataset, val_dataset, best_params)
         y_pred = model.predict(test_x, num_iteration=model.best_iteration)
         submission += y_pred
+        importance = pd.DataFrame(model.feature_importance(), index=test_x.columns, columns=['importance'])
+        importances += importance
 
     submission_df = pd.DataFrame(submission/n_splits)
-    print("#################################")
+    importances_df = importances.sort_values('importance') / n_splits
+    print("#################submission & best_params & importances################")
     print(submission_df)
     print(best_params) 
+    print(importances_df)
     print("#################################")
     
     submission_df.to_csv(f"{DATA_DIR}/my_submission.csv", header=False)
