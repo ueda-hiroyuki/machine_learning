@@ -19,6 +19,7 @@ train_pitch(51 columns)
 test_pitch(49 columns)
 2つの差は「球種」と「投球位置区域」である
 ⇒今回は「球種」を分類する(0~7の8種類)。
+⇒「投球位置区域」の場合は0~12の13種類分類
 
 train_player(25 columns)
 test_player(25 columns)
@@ -36,9 +37,67 @@ TRAIN_PLAYER_PATH = f"{DATA_DIR}/train_player.csv"
 TEST_PITCH_PATH = f"{DATA_DIR}/test_pitch.csv"
 TEST_PLAYER_PATH = f"{DATA_DIR}/test_player.csv"
 SUBMISSION_PATH = f"{DATA_DIR}/sample_submit_ball_type.csv"
-PITCH_REMOVAL_COLUMNS = ["日付", "時刻", "年度", "試合内連番", "成績対象打者ID", "成績対象投手ID", "打者試合内打席数", "試合ID"]
-PLAYER_REMOVAL_COLUMNS = ["出身高校名", "出身大学名", "生年月日", "位置", "出身地", "出身国", "年度", "チームID", "社会人","ドラフト年","ドラフト種別","ドラフト順位", "年俸"]
-LABEL_ENCORDER_COLUMNS = ["球場名", "試合種別詳細", "表裏", "投手投球左右", "投手役割", "打者打席左右", "打者守備位置", "プレイ前走者状況", "チーム名", "選手名", "投", "打", "血液型"]
+PITCH_REMOVAL_COLUMNS = [
+    "日付", 
+    "時刻", 
+    "年度", 
+    "試合内連番", 
+    "成績対象打者ID", 
+    "成績対象投手ID", 
+    "打者試合内打席数", 
+    "試合ID",
+    "表裏",
+    "一塁走者ID",
+    "二塁走者ID",
+    "三塁走者ID",
+    "球場名",
+    "プレイ前ホームチーム得点数",
+    "プレイ前アウェイチーム得点数",
+    "アウェイチームID",
+    "球場ID",
+    "打者チームID",
+    "試合種別詳細",
+    "プレイ前アウト数",
+    "ホームチームID",
+    "左翼手ID",
+    "データ内連番",
+    "投手登板順",
+    "打者ID",
+    "打者打順",
+    "試合内投球数",
+    "一塁手ID",
+    "二塁手ID",
+    "投手イニング内投球数",
+    "イニング内打席数",
+]
+PLAYER_REMOVAL_COLUMNS = [
+    "出身高校名", 
+    "出身大学名", 
+    "生年月日", 
+    "位置", 
+    "出身地", 
+    "出身国", 
+    "年度", 
+    "チームID", 
+    "社会人",
+    "育成選手F",
+    "投"
+]
+LABEL_ENCORDER_COLUMNS = [
+    "球場名", 
+    "試合種別詳細", 
+    "表裏", 
+    "投手投球左右", 
+    "投手役割", 
+    "打者打席左右", 
+    "打者守備位置", 
+    "プレイ前走者状況", 
+    "チーム名", 
+    "選手名", 
+    "投", 
+    "打", 
+    "血液型"
+]
 
 def remove_columns(df):
     df = df.drop(REMOVAL_COLUMNS, axis=1).fillna(0)
@@ -107,6 +166,7 @@ def get_best_params(train_x: t.Any, train_y: t.Any, num_class: int) -> t.Any:
     best_params['num_class'] = num_class
     return best_params
 
+
 def get_model(tr_dataset: t.Any, val_dataset: t.Any, params: t.Dict[str, t.Any]) -> t.Any:
     model = lgb.train(
         params=params,
@@ -115,6 +175,7 @@ def get_model(tr_dataset: t.Any, val_dataset: t.Any, params: t.Dict[str, t.Any])
         early_stopping_rounds=5,
     )
     return model
+
 
 def gen_r2_score_fig(score_list, n_splits, save_dir):
     plt.figure()
@@ -161,20 +222,20 @@ def main():
 
     n_splits = 5
     num_class = 8
-    best_params = get_best_params(train_x, train_y, num_class) # 最適ハイパーパラメータの探索
-    # best_params = {
-    #     'objective': 'multiclass',
-    #     'boosting_type': 'gbdt',
-    #     'metric': 'multi_logloss',
-    #     'num_class': 8
-    #     'learning_rate': [0.2, 0.5],
-    #     'n_estimators': [50, 100],
-    #     'min_data_in_leaf': [10, 100, 1000],
-    #     'num_leaves': [20, 40],
-    #     'num_iterations' : [100, 200, 500],
-    #     'feature_fraction' : [0.7],
-    #     'max_depth' : [5, 10, 20]
-    # }
+    # best_params = get_best_params(train_x, train_y, num_class) # 最適ハイパーパラメータの探索
+    best_params = {
+        'objective': 'multiclass',
+        'boosting_type': 'gbdt',
+        'metric': 'multi_logloss',
+        'num_class': 8,
+        'learning_rate': 0.1,
+        'n_estimators': 50,
+        'min_data_in_leaf': 1000,
+        'num_leaves': 10,
+        'num_iterations' : 1000,
+        'feature_fraction' : 0.7,
+        'max_depth' : 10
+    }
     submission = np.zeros((len(test_x),num_class))
     importances = pd.DataFrame(np.zeros(len(test_x.columns)), index=test_x.columns, columns=['importance'])
     kf = KFold(n_splits=n_splits, shuffle=True, random_state=0)
