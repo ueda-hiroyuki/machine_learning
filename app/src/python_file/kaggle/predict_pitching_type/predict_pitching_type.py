@@ -119,13 +119,13 @@ def get_best_params(train_x: t.Any, train_y: t.Any, num_class: int) -> t.Any:
     gbm = lgb.LGBMClassifier(
         objective="multiclass",
         boosting_type= 'gbdt', 
-        #n_jobs=4
+        n_jobs=4
     )
     grid_params = {
-        'learning_rate': [0.1, 0.2],
-        'n_estimators': [50, 100],
-        'min_data_in_leaf': [1000],
-        'num_leaves': [10, 20],
+        'learning_rate': [0.1, 0.2, 0.5],
+        'n_estimators': [10, 50, 100],
+        'min_data_in_leaf': [1000, 1500, 2000],
+        'num_leaves': [10, 20, 50],
         'num_iterations' : [100],
         'feature_fraction' : [0.7],
         'max_depth' : [10]
@@ -222,20 +222,20 @@ def main():
 
     n_splits = 5
     num_class = 8
-    # best_params = get_best_params(train_x, train_y, num_class) # 最適ハイパーパラメータの探索
-    best_params = {
-        'objective': 'multiclass',
-        'boosting_type': 'gbdt',
-        'metric': 'multi_logloss',
-        'num_class': 8,
-        'learning_rate': 0.1,
-        'n_estimators': 50,
-        'min_data_in_leaf': 1000,
-        'num_leaves': 10,
-        'num_iterations' : 1000,
-        'feature_fraction' : 0.7,
-        'max_depth' : 10
-    }
+    best_params = get_best_params(train_x, train_y, num_class) # 最適ハイパーパラメータの探索
+    # best_params = {
+    #     'objective': 'multiclass',
+    #     'boosting_type': 'gbdt',
+    #     'metric': 'multi_logloss',
+    #     'num_class': 8,
+    #     'learning_rate': 0.2,
+    #     'n_estimators': 50,
+    #     'min_data_in_leaf': 1000,
+    #     'num_leaves': 20,
+    #     'num_iterations' : 1000,
+    #     'feature_fraction' : 0.7,
+    #     'max_depth' : 10
+    # }
     submission = np.zeros((len(test_x),num_class))
     importances = pd.DataFrame(np.zeros(len(test_x.columns)), index=test_x.columns, columns=['importance'])
     kf = KFold(n_splits=n_splits, shuffle=True, random_state=0)
@@ -261,7 +261,7 @@ def main():
     print(importances_df)
     print("#################################")
     
-    submission_df.to_csv(f"{DATA_DIR}/my_submission.csv", header=False)
+    submission_df.to_csv(f"{DATA_DIR}/my_submission4.csv", header=False)
 
 
 if __name__ == "__main__":
