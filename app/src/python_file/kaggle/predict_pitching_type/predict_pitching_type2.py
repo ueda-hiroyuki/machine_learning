@@ -41,55 +41,64 @@ def remove_columns(df):
     df = df.drop(REMOVAL_COLUMNS, axis=1).fillna(0)
     return df
 
+def get_best_col_names(train_x: t.Any, train_y: t.Any, best_params: t.Any) -> t.Any:
+    tr_x, val_x, tr_y, val_y = train_test_split(train_x, train_y, test_size=0.2, random_state=0)
+    tr_dataset = lgb.Dataset(tr_x, tr_y)
+    val_dataset = lgb.Dataset(val_x, val_y, reference=tr_dataset)
+    model = lgb.train(
+        params=best_params,
+        train_set=tr_dataset,
+        valid_sets=val_dataset,
+        early_stopping_rounds=5,
+    )
+    pre_importance_df = pd.DataFrame({
+        'feature': tr_x.columns,
+        'importance': model.feature_importance()
+    }).sort_values('importance', ascending=False)
+    important_feature = pre_importance_df.iloc[0:20]
+    important_cols = list(important_feature["feature"])
+    return important_cols
 
-def label_encorder(col: pd.Series) -> pd.DataFrame:
-    if col.dtypes == "object":
-        encorded_col = LabelEncoder().fit_transform(col)
-        print(encorded_col)
-        return encorded_col
-    else:
-        print(col)
-        return col
 
 
 def get_best_params(train_x: t.Any, train_y: t.Any, num_class: int) -> t.Any:
+    tr_x, val_x, tr_y, val_y = train_test_split(train_x, train_y, test_size=0.2, random_state=0)
     best_params = {}
     gbm = lgb.LGBMClassifier(
         objective="multiclass",
         boosting_type= 'gbdt', 
         n_jobs = 4,
     )
-    grid_params = {
-        'learning_rate': [0.1, 0.2, 0.5],
-        'n_estimators': [50, 100, 200],
-        'min_data_in_leaf': [10, 100, 1000, 1500, 2000],
-        'num_leaves': [10, 20, 50],
-        'num_iterations' : [100, 200, 500],
-        'feature_fraction' : [0.7, 0.8],
-        'max_depth' : [5, 10, 20]
-    }
     # grid_params = {
-    #     'learning_rate': [0.2],
-    #     'n_estimators': [50],
-    #     'num_leaves': [20],
-    #     'num_iterations' : [5],
-    #     'feature_fraction' : [0.7],
-    #     'max_depth' : [5]
+    #     'learning_rate': [0.1, 0.2, 0.5],
+    #     'n_estimators': [50, 100, 200],
+    #     'min_data_in_leaf': [10, 100, 1000, 1500, 2000],
+    #     'num_leaves': [10, 20, 50],
+    #     'num_iterations' : [100, 200, 500],
+    #     'feature_fraction' : [0.7, 0.8],
+    #     'max_depth' : [5, 10, 20]
     # }
+    grid_params = {
+        'learning_rate': [0.1],
+        'n_estimators': [50],
+        'min_data_in_leaf': [2000],
+        'num_leaves': [10],
+        'num_iterations' : [10],
+        'feature_fraction' : [0.7],
+        'max_depth' : [10]
+    }
     grid_search = GridSearchCV(
         gbm, # 分類器,
         param_grid=grid_params, # 試したいパラメータの渡し方
         cv=5, # 5分割交差検証
     )
     grid_search.fit(
-        train_x,
-        train_y,
+        tr_x,
+        tr_y,
+        eval_set=[(val_x, val_y)],
+        early_stopping_rounds=5
     )
-    print("#################################")
-    print(grid_search.best_score_)
-    print(grid_search.best_params_) 
-    print("#################################")
-    
+
     best_params['learning_rate'] = grid_search.best_params_['learning_rate']
     best_params['min_data_in_leaf'] = grid_search.best_params_['min_data_in_leaf']
     best_params['n_estimators'] = grid_search.best_params_['n_estimators']
@@ -129,7 +138,8 @@ def main():
     sub = pd.read_csv(SUBMISSION_PATH)
 
     train_pitch["use"] = "train"
-    test_pitch["use"] = "test" 
+    test_pitch["use"] = "test"
+    test_pitch["球種"] = 0
     pitch_data = pd.concat([train_pitch, test_pitch], axis=0).drop(PITCH_REMOVAL_COLUMNS, axis=1)
 
     player_data = pd.concat([train_player, test_player], axis=0).drop(PLAYER_REMOVAL_COLUMNS, axis=1) #.fillna(0)
@@ -142,12 +152,14 @@ def main():
         left_on='投手ID', 
         right_on='選手ID'
     ).drop(['選手ID', '投球位置区域'], axis=1)
+    merged_data = merged_data.dropna(how="any").reset_index(drop=True)
     use = merged_data.loc[:, "use"]
-    merged_data = merged_data.drop(["use"], axis=1)
-    encorded_data = cf.label_encorder(merged_data)
+    encorded_data = cf.label_encorder(merged_data.drop(["use"], axis=1))
+    # cf.check_hist(encorded_data, "predict_pitching_type")
     # encorded_data = cf.standardize(encorded_data) # 標準化
+    
     encorded_data = pd.concat([encorded_data, use], axis=1)
- 
+    
     train = encorded_data[encorded_data["use"] == "train"].drop("use", axis=1)
     test = encorded_data[encorded_data["use"] == "test"].drop("use", axis=1)
 
@@ -155,9 +167,10 @@ def main():
     train_y = train.loc[:,"球種"]
     test_x = test.drop("球種", axis=1).reset_index(drop=True)
 
-    n_splits = 3
+    n_splits = 10
     num_class = 8
     best_params = get_best_params(train_x, train_y, num_class) # 最適ハイパーパラメータの探索
+    best_col_names = get_best_col_names(train_x, train_y, best_params)
     # best_params = {
     #     "objective": 'multiclass',
     #     "boosting_type": 'gbdt',
@@ -171,8 +184,9 @@ def main():
     #     'feature_fraction' : 0.7,
     #     'max_depth' : 10
     # }
-    submission = np.zeros((len(test_x),num_class))
 
+    train_x = train_x.loc[:, best_col_names]
+    submission = np.zeros((len(test_x),num_class))
     kf = KFold(n_splits=n_splits, shuffle=True, random_state=0)
     for tr_idx, val_idx in kf.split(train_x, train_y):
         tr_x = train_x.iloc[tr_idx].reset_index(drop=True)
@@ -192,11 +206,13 @@ def main():
     print(best_params) 
     print("#################################")
     
-    submission_df.to_csv(f"{DATA_DIR}/my_submission7.csv", header=False)
+    submission_df.to_csv(f"{DATA_DIR}/my_submission8.csv", header=False)
 
 
 if __name__ == "__main__":
     main()
+
+
 
 
 # import gc
