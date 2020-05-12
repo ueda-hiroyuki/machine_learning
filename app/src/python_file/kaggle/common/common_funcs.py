@@ -53,6 +53,12 @@ def check_fig(df: pd.DataFrame, f_name: str) -> pd.DataFrame:
         plt.savefig(f'src/sample_data/Kaggle/kaggle_dataset/{f_name}/{name}.png')
 
 
+def check_hist(df: pd.DataFrame, f_name: str):
+    df.hist(figsize=(30,30)); # 一括でヒストグラムを描画する
+    plt.tight_layout() # グラフ同士が重ならないようにする関数
+    plt.savefig(f'src/sample_data/Kaggle/{f_name}/histgrams.png')
+
+
 def label_encorder(df: pd.DataFrame) -> pd.DataFrame:
     for col_name, col in df.iteritems():
         col = col.fillna(col.mode()[0])
@@ -71,13 +77,32 @@ def label_encorder(df: pd.DataFrame) -> pd.DataFrame:
         df[col] = le.fit_transform(series)
     return df
 
+def remove_outlier(df: pd.DataFrame, sigma: int):
+    for i in range(len(df.columns)):
+        # 列を抽出する
+        col = df.iloc[:,i]
 
-def remove_outlier(df: pd.DataFrame, sigma: int) -> pd.DataFrame:
-    for name in df:
-        series = df[name]
-        z = stats.zscore(series) < sigma
-        df[name] = column[z]
+        # 平均と標準偏差
+        average = np.mean(col)
+        sd = np.std(col)
+
+        # 外れ値の基準点
+        outlier_min = average - (sd) * sigma
+        outlier_max = average + (sd) * sigma
+
+        # 範囲から外れている値を除く
+        col[col < outlier_min] = None
+        col[col > outlier_max] = None
+
     return df
+
+
+# def remove_outlier(df: pd.DataFrame, sigma: int) -> pd.DataFrame:
+#     for name in df:
+#         series = df[name]
+#         z = stats.zscore(series) < sigma
+#         df[name] = series[z]
+#     return df
 
 
 def standardize(df: pd.DataFrame) -> pd.DataFrame:

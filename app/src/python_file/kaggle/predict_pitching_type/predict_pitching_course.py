@@ -43,24 +43,26 @@ PITCH_REMOVAL_COLUMNS = [
     "試合内連番", 
     "成績対象打者ID", 
     "成績対象投手ID", 
-    "打者試合内打席数", 
+    "打者試合内打席数",
+    "投手役割",
+    "イニング",
     # "試合ID",
-    # "表裏",
+    "表裏",
     # "一塁走者ID",
     # "二塁走者ID",
     # "三塁走者ID",
     # "球場名",
-    # "プレイ前ホームチーム得点数",
-    # "プレイ前アウェイチーム得点数",
+    "プレイ前ホームチーム得点数",
+    "プレイ前アウェイチーム得点数",
     # "アウェイチームID",
     # "球場ID",
     # "打者チームID",
-    # "試合種別詳細",
+    "試合種別詳細",
     # "プレイ前アウト数",
-    # "ホームチームID",
+    "ホームチームID",
     # "左翼手ID",
     # "データ内連番",
-    # "投手登板順",
+    "投手登板順",
     # "打者ID",
     # "打者打順",
     # "試合内投球数",
@@ -80,7 +82,11 @@ PLAYER_REMOVAL_COLUMNS = [
     "チームID", 
     "社会人",
     "育成選手F",
-    "投"
+    "投",
+    "打",
+    "ドラフト種別",
+    "ドラフト順位",
+    "血液型",
 ]
 LABEL_ENCORDER_COLUMNS = [
     "球場名", 
@@ -210,22 +216,22 @@ def main():
     train_y = train.loc[:,"投球位置区域"].astype(int)
     test_x = test.drop("投球位置区域", axis=1).reset_index(drop=True)
 
-    n_splits = 3
+    n_splits = 5
     num_class = 13
-    best_params = get_best_params(train_x, train_y, num_class) # 最適ハイパーパラメータの探索
-    # best_params = {
-    #     'objective': 'multiclass',
-    #     'boosting_type': 'gbdt',
-    #     'metric': 'multi_logloss',
-    #     'num_class': 8,
-    #     'learning_rate': 0.2,
-    #     'n_estimators': 50,
-    #     'min_data_in_leaf': 1000,
-    #     'num_leaves': 20,
-    #     'num_iterations' : 1000,
-    #     'feature_fraction' : 0.7,
-    #     'max_depth' : 10
-    # }
+    # best_params = get_best_params(train_x, train_y, num_class) # 最適ハイパーパラメータの探索
+    best_params = {
+        'objective': 'multiclass',
+        'boosting_type': 'gbdt',
+        'metric': 'multi_logloss',
+        'num_class': num_class,
+        'learning_rate': 0.1,
+        'n_estimators': 10000,
+        'min_data_in_leaf': 2000,
+        'num_leaves': 10,
+        'num_iterations' : 1000,
+        'feature_fraction' : 0.7,
+        'max_depth' : 10
+    }
     submission = np.zeros((len(test_x),num_class))
     importances = pd.DataFrame(np.zeros(len(test_x.columns)), index=test_x.columns, columns=['importance'])
     kf = KFold(n_splits=n_splits, shuffle=True, random_state=0)
@@ -251,7 +257,7 @@ def main():
     print(importances_df)
     print("#################################")
     
-    submission_df.to_csv(f"{DATA_DIR}/submission_pitching_course.csv", header=False)
+    submission_df.to_csv(f"{DATA_DIR}/submission_pitching_course2.csv", header=False)
 
 
 if __name__ == "__main__":
