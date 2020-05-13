@@ -72,11 +72,11 @@ def get_best_params(train_x: t.Any, train_y: t.Any, num_class: int) -> t.Any:
     grid_params = {
         'learning_rate': [0.1, 0.2, 0.5],
         'n_estimators': [10000],
-        'min_data_in_leaf': [10, 100, 1000, 1500, 2000],
+        'min_data_in_leaf': [10, 100, 500, 1000, 1500, 2000],
         'num_leaves': [10, 20, 50],
-        'num_iterations' : [100, 200, 500],
+        'num_iterations' : [100, 200, 500, 1000],
         'feature_fraction' : [0.7, 0.8],
-        'max_depth' : [5, 10, 20]
+        'max_depth' : [5, 10, 20, 50]
     }
     # grid_params = {
     #     'learning_rate': [0.1],
@@ -87,10 +87,11 @@ def get_best_params(train_x: t.Any, train_y: t.Any, num_class: int) -> t.Any:
     #     'feature_fraction' : [0.7],
     #     'max_depth' : [10]
     # }
+    _kf = KFold(n_splits=10, shuffle=True, random_state=0)
     grid_search = GridSearchCV(
         gbm, # 分類器,
         param_grid=grid_params, # 試したいパラメータの渡し方
-        cv=5, # 5分割交差検証
+        cv=_kf, # 5分割交差検証
     )
     grid_search.fit(
         tr_x,
@@ -167,7 +168,7 @@ def main():
     train_y = train.loc[:,"球種"]
     test_x = test.drop("球種", axis=1).reset_index(drop=True)
 
-    n_splits = 10
+    n_splits = 5
     num_class = 8
     best_params = get_best_params(train_x, train_y, num_class) # 最適ハイパーパラメータの探索
     best_col_names = get_best_col_names(train_x, train_y, best_params)
@@ -216,7 +217,7 @@ def main():
     print(best_params) 
     print("#################################")
     
-    submission_df.to_csv(f"{DATA_DIR}/my_submission8.csv", header=False)
+    submission_df.to_csv(f"{DATA_DIR}/my_submission9.csv", header=False)
 
 
 if __name__ == "__main__":
