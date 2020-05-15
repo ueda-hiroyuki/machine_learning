@@ -127,9 +127,9 @@ def get_best_params(train_x: t.Any, train_y: t.Any, num_class: int) -> t.Any:
         n_jobs=4
     )
     grid_params = {
-        'learning_rate': [0.1, 0.2, 0.5],
+        'learning_rate': [0.1, 0.2],
         'n_estimators': [10, 50, 100],
-        'min_data_in_leaf': [1000, 1500, 2000],
+        'min_data_in_leaf': [500, 1000],
         'num_leaves': [10, 20, 50],
         'num_iterations' : [100],
         'feature_fraction' : [0.7],
@@ -216,7 +216,7 @@ def main():
     train_y = train.loc[:,"投球位置区域"].astype(int)
     test_x = test.drop("投球位置区域", axis=1).reset_index(drop=True)
 
-    n_splits = 5
+    n_splits = 3
     num_class = 13
     # best_params = get_best_params(train_x, train_y, num_class) # 最適ハイパーパラメータの探索
     best_params = {
@@ -257,7 +257,7 @@ def main():
     print(importances_df)
     print("#################################")
     
-    submission_df.to_csv(f"{DATA_DIR}/submission_pitching_course2.csv", header=False)
+    submission_df.to_csv(f"{DATA_DIR}/submission_pitching_course3.csv", header=False)
 
 
 if __name__ == "__main__":
