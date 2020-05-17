@@ -8,11 +8,16 @@ import typing as t
 import seaborn as sns
 import matplotlib as mpl
 import matplotlib.pyplot as plt
+import category_encoders as ce # カテゴリ変数encording用ライブラリ
+import optuna #ハイパーパラメータチューニング自動化ライブラリ
+from optuna.integration import lightgbm_tuner #LightGBM用Stepwise Tuningに必要
+from sklearn.impute import SimpleImputer 
 from functools import partial
 from python_file.kaggle.common import common_funcs as cf
-from sklearn.model_selection import train_test_split, KFold, StratifiedKFold, GridSearchCV, RandomizedSearchCV
+from sklearn.feature_selection import RFE
+from sklearn.model_selection import train_test_split, KFold, StratifiedKFold, cross_val_predict
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, LabelEncoder, OneHotEncoder
-from sklearn.metrics import mean_squared_error, r2_score
+from sklearn.metrics import mean_squared_error, r2_score, accuracy_score
 
 
 """
@@ -34,74 +39,34 @@ TRAIN_PLAYER_PATH = f"{DATA_DIR}/train_player.csv"
 TEST_PITCH_PATH = f"{DATA_DIR}/test_pitch.csv"
 TEST_PLAYER_PATH = f"{DATA_DIR}/test_player.csv"
 SUBMISSION_PATH = f"{DATA_DIR}/sample_submit_ball_type.csv"
-PITCH_REMOVAL_COLUMNS = ["日付", "時刻", "年度", "試合内連番", "成績対象打者ID", "成績対象投手ID", "打者試合内打席数", "試合ID"]
-PLAYER_REMOVAL_COLUMNS = ["出身高校名", "出身大学名", "生年月日", "位置", "出身地", "出身国", "年度", "チームID", "社会人","ドラフト年","ドラフト種別","ドラフト順位", "年俸"]
-LABEL_ENCORDER_COLUMNS = ["球場名", "試合種別詳細", "表裏", "投手投球左右", "投手役割", "打者打席左右", "打者守備位置", "プレイ前走者状況", "チーム名", "選手名", "投", "打", "血液型"]
+PITCH_REMOVAL_COLUMNS = ["データ内連番", "日付", "時刻", "試合内連番"]
+PLAYER_REMOVAL_COLUMNS = ["社会人","ドラフト年","ドラフト種別","ドラフト順位","育成選手F"] # データ内のnanが多い列は予め除去
 
-def remove_columns(df):
-    df = df.drop(REMOVAL_COLUMNS, axis=1).fillna(0)
-    return df
-
-
-def label_encorder(col: pd.Series) -> pd.DataFrame:
-    if col.dtypes == "object":
-        encorded_col = LabelEncoder().fit_transform(col)
-        print(encorded_col)
-        return encorded_col
-    else:
-        print(col)
-        return col
-
+NUM_CLASS = 8
 
 def get_best_params(train_x: t.Any, train_y: t.Any, num_class: int) -> t.Any:
+    tr_x, val_x, tr_y, val_y = train_test_split(train_x, train_y, test_size=0.2, random_state=1)
+    lgb_train = lgb.Dataset(tr_x, tr_y)
+    lgb_eval = lgb.Dataset(val_x, val_y)
     best_params = {}
-    gbm = lgb.LGBMClassifier(
-        objective="multiclass",
-        boosting_type= 'gbdt', 
-        n_jobs = 4,
-    )
-    grid_params = {
-        'learning_rate': [0.1, 0.2, 0.5],
-        'n_estimators': [50, 100, 200],
-        'min_data_in_leaf': [10, 100, 1000, 1500, 2000],
-        'num_leaves': [10, 20, 50],
-        'num_iterations' : [100, 200, 500],
-        'feature_fraction' : [0.7, 0.8],
-        'max_depth' : [5, 10, 20]
+    params = {
+        'objective': 'multiclass',
+        'metric': 'multi_logloss',
+        'boosting_type': 'gbdt', 
+        'num_class': num_class,
     }
-    # grid_params = {
-    #     'learning_rate': [0.2],
-    #     'n_estimators': [50],
-    #     'num_leaves': [20],
-    #     'num_iterations' : [5],
-    #     'feature_fraction' : [0.7],
-    #     'max_depth' : [5]
-    # }
-    grid_search = GridSearchCV(
-        gbm, # 分類器,
-        param_grid=grid_params, # 試したいパラメータの渡し方
-        cv=5, # 5分割交差検証
+    best_params = {}
+    tuning_history = []
+    gbm = lightgbm_tuner.train(
+        params,
+        lgb_train,
+        valid_sets=lgb_eval,
+        num_boost_round=500,
+        early_stopping_rounds=5,
+        verbose_eval=10,
+        best_params=best_params,
+        tuning_history=tuning_history
     )
-    grid_search.fit(
-        train_x,
-        train_y,
-    )
-    print("#################################")
-    print(grid_search.best_score_)
-    print(grid_search.best_params_) 
-    print("#################################")
-    
-    best_params['learning_rate'] = grid_search.best_params_['learning_rate']
-    best_params['min_data_in_leaf'] = grid_search.best_params_['min_data_in_leaf']
-    best_params['n_estimators'] = grid_search.best_params_['n_estimators']
-    best_params['num_leaves'] = grid_search.best_params_['num_leaves']
-    best_params['num_iterations'] = grid_search.best_params_['num_iterations']
-    best_params['feature_fraction'] = grid_search.best_params_['feature_fraction']
-    best_params['max_depth'] = grid_search.best_params_['max_depth']
-    best_params["objective"] = 'multiclass'
-    best_params["boosting_type"] = 'gbdt'
-    best_params["metric"] = 'multi_logloss'
-    best_params['num_class'] = num_class
     return best_params
 
 def get_model(tr_dataset: t.Any, val_dataset: t.Any, params: t.Dict[str, t.Any]) -> t.Any:
@@ -110,19 +75,58 @@ def get_model(tr_dataset: t.Any, val_dataset: t.Any, params: t.Dict[str, t.Any])
         train_set=tr_dataset,
         valid_sets=val_dataset,
         early_stopping_rounds=5,
+        num_boost_round=500,
     )
     return model
 
-def gen_r2_score_fig(score_list, n_splits, save_dir):
-    plt.figure()
-    plt.plot(range(1, n_splits+1), marker='o')
-    plt.xlabel("epochs")
-    plt.ylabel("r2_score")
-    plt.xlim(0, n_splits+1)
-    plt.savefig(f"{save_dir}/r2_score.png")
+def objective(X, y, trial):
+    """最適化する目的関数"""
+    tr_x, val_x, tr_y, val_y = train_test_split(X, y, random_state=1)
+    gbm = lgb.LGBMClassifier(
+        n_estimators = 100,
+        num_leaves = 20,
+        learning_rate=0.1,
+        objective="multiclass",
+        boosting_type= 'gbdt', 
+        n_jobs = 4,
+    )
+    # RFE で取り出す特徴量の数を最適化する
+    n_features_to_select = trial.suggest_int('n_features_to_select', 1, 60),
+    rfe = RFE(estimator=gbm, n_features_to_select=n_features_to_select)
+    rfe.fit(val_x, val_y)
+    selected_cols = list(tr_x.columns[rfe.support_])
+    
+    tr_x_selected = tr_x.loc[:, selected_cols]
+    y_pred = cross_val_predict(
+        gbm, 
+        tr_x_selected, 
+        tr_y,
+        cv=3,
+        method='predict'
+    )
+    accuracy = accuracy_score(tr_y, y_pred)
+    return accuracy
+
+def get_important_features(train_x: t.Any, train_y: t.Any, best_feature_count: int):
+    gbm = lgb.LGBMClassifier(
+        n_estimators = 100,
+        objective="multiclass",
+        boosting_type= 'gbdt', 
+        n_jobs = 4,
+    )
+    selector = RFE(gbm, n_features_to_select=best_feature_count) # estimatorを用いて特徴量数を26個から10個まで5%ずつ減らしていく。
+    selector.fit(train_x, train_y) # 学習データを渡す
+    selected_train_x = pd.DataFrame(selector.transform(train_x), columns=train_x.columns[selector.support_])
+    return selected_train_x, train_y
 
 
 def main():
+    """
+    << 処理の流れ >>
+    データ読み込み ⇒ 投球データと選手データの結合(train,testも結合) ⇒ nanの置換 ⇒ カテゴリ変数の変換 ⇒
+    RFEによる特徴量選択(個数の最適化) ⇒ ハイパーパラメータの最適化 ⇒ 交差検証
+    """
+
     train_pitch = pd.read_csv(TRAIN_PITCH_PATH)
     train_player = pd.read_csv(TRAIN_PLAYER_PATH)
     test_pitch = pd.read_csv(TEST_PITCH_PATH)
@@ -130,7 +134,8 @@ def main():
     sub = pd.read_csv(SUBMISSION_PATH)
 
     train_pitch["use"] = "train"
-    test_pitch["use"] = "test" 
+    test_pitch["use"] = "test"
+    test_pitch["球種"] = 100
     pitch_data = pd.concat([train_pitch, test_pitch], axis=0).drop(PITCH_REMOVAL_COLUMNS, axis=1)
 
     player_data = pd.concat([train_player, test_player], axis=0).drop(PLAYER_REMOVAL_COLUMNS, axis=1) #.fillna(0)
@@ -138,27 +143,40 @@ def main():
 
     merged_data = pd.merge(
         pitch_data, 
-        pitchers_data, 
+        player_data, 
         how="left", 
-        left_on='投手ID', 
-        right_on='選手ID'
-    ).drop(['選手ID', '投球位置区域'], axis=1)
+        left_on=['年度','投手ID'], 
+        right_on=['年度','選手ID'],
+    ).drop(['選手ID', '投球位置区域'], axis=1).fillna(0)
+
     use = merged_data.loc[:, "use"]
-    merged_data = merged_data.drop(["use"], axis=1)
-    encorded_data = cf.label_encorder(merged_data)
-    # encorded_data = cf.standardize(encorded_data) # 標準化
+    merged_data = merged_data.drop(["use", "位置"], axis=1)
+
+    # category_encodersによってカテゴリ変数をencordingする
+    categorical_columns = [c for c in merged_data.columns if merged_data[c].dtype == 'object']
+    ce_oe = ce.OrdinalEncoder(cols=categorical_columns, handle_unknown='impute')
+    encorded_data = ce_oe.fit_transform(merged_data) 
     encorded_data = pd.concat([encorded_data, use], axis=1)
  
-    train = encorded_data[encorded_data["use"] == "train"].drop("use", axis=1)
-    test = encorded_data[encorded_data["use"] == "test"].drop("use", axis=1)
+    train = encorded_data[encorded_data["use"] == "train"].drop("use", axis=1).reset_index(drop=True)
+    test = encorded_data[encorded_data["use"] == "test"].drop("use", axis=1).reset_index(drop=True)
 
     train_x = train.drop("球種", axis=1)
     train_y = train.loc[:,"球種"]
-    test_x = test.drop("球種", axis=1).reset_index(drop=True)
+    test_x = test.drop("球種", axis=1)
 
-    n_splits = 3
+    f = partial(objective, train_x, train_y) # 目的関数に引数を固定しておく
+    study = optuna.create_study(direction='maximize') # Optuna で取り出す特徴量の数を最適化する
+
+    study.optimize(f, n_trials=10) # 試行回数を決定する
+    print('params:', study.best_params)# 発見したパラメータを出力する
+    best_feature_count = study.best_params['n_features_to_select']
+    selected_train_x, train_y = get_important_features(train_x, train_y, best_feature_count)
+
+    n_splits = 5
     num_class = 8
-    best_params = get_best_params(train_x, train_y, num_class) # 最適ハイパーパラメータの探索
+    best_params = get_best_params(selected_train_x, train_y, num_class) # 最適ハイパーパラメータの探索
+
     # best_params = {
     #     "objective": 'multiclass',
     #     "boosting_type": 'gbdt',
@@ -193,7 +211,7 @@ def main():
     print(best_params) 
     print("#################################")
     
-    submission_df.to_csv(f"{DATA_DIR}/my_submission7.csv", header=False)
+    submission_df.to_csv(f"{DATA_DIR}/my_submission13.csv", header=False)
 
 
 if __name__ == "__main__":
