@@ -39,8 +39,9 @@ TRAIN_PLAYER_PATH = f"{DATA_DIR}/train_player.csv"
 TEST_PITCH_PATH = f"{DATA_DIR}/test_pitch.csv"
 TEST_PLAYER_PATH = f"{DATA_DIR}/test_player.csv"
 SUBMISSION_PATH = f"{DATA_DIR}/sample_submit_ball_type.csv"
-PITCH_REMOVAL_COLUMNS = ["データ内連番", "日付", "時刻", "試合内連番"]
-PLAYER_REMOVAL_COLUMNS = ["社会人","ドラフト年","ドラフト種別","ドラフト順位","育成選手F"] # データ内のnanが多い列は予め除去
+
+PITCH_REMOVAL_COLUMNS = ["日付", "時刻", "試合内連番", "成績対象打者ID", "成績対象投手ID", "打者試合内打席数", "試合ID"]
+PLAYER_REMOVAL_COLUMNS = ["出身高校名", "出身大学名", "生年月日", "出身地", "出身国", "チームID", "社会人","ドラフト年","ドラフト種別","ドラフト順位", "年俸", "育成選手F"]
 
 NUM_CLASS = 8
 
@@ -83,38 +84,38 @@ def objective(X, y, trial):
     """最適化する目的関数"""
     tr_x, val_x, tr_y, val_y = train_test_split(X, y, random_state=1)
     gbm = lgb.LGBMClassifier(
-        n_estimators = 100,
-        num_leaves = 20,
-        learning_rate=0.1,
         objective="multiclass",
         boosting_type= 'gbdt', 
         n_jobs = 4,
     )
     # RFE で取り出す特徴量の数を最適化する
-    n_features_to_select = trial.suggest_int('n_features_to_select', 1, 60),
+    n_features_to_select = trial.suggest_int('n_features_to_select', 1, len(list(tr_x.columns))),
     rfe = RFE(estimator=gbm, n_features_to_select=n_features_to_select)
     rfe.fit(val_x, val_y)
     selected_cols = list(tr_x.columns[rfe.support_])
     
     tr_x_selected = tr_x.loc[:, selected_cols]
-    y_pred = cross_val_predict(
-        gbm, 
-        tr_x_selected, 
-        tr_y,
-        cv=3,
-        method='predict'
-    )
-    accuracy = accuracy_score(tr_y, y_pred)
+    val_x_selected = val_x.loc[:, selected_cols]
+    gbm.fit(tr_x_selected, tr_y)
+    y_pred = gbm.predict(val_x_selected)
+    # y_pred = cross_val_predict(
+    #     gbm, 
+    #     tr_x_selected, 
+    #     tr_y,
+    #     cv=3,
+    #     method='predict'
+    # )
+    accuracy = accuracy_score(val_y, y_pred)
     return accuracy
 
 def get_important_features(train_x: t.Any, train_y: t.Any, best_feature_count: int):
     gbm = lgb.LGBMClassifier(
-        n_estimators = 100,
+        n_estimators = 500,
         objective="multiclass",
         boosting_type= 'gbdt', 
         n_jobs = 4,
     )
-    selector = RFE(gbm, n_features_to_select=best_feature_count) # estimatorを用いて特徴量数を26個から10個まで5%ずつ減らしていく。
+    selector = RFE(gbm, n_features_to_select=best_feature_count)
     selector.fit(train_x, train_y) # 学習データを渡す
     selected_train_x = pd.DataFrame(selector.transform(train_x), columns=train_x.columns[selector.support_])
     return selected_train_x, train_y
@@ -135,7 +136,7 @@ def main():
 
     train_pitch["use"] = "train"
     test_pitch["use"] = "test"
-    test_pitch["球種"] = 100
+    test_pitch["球種"] = 0
     pitch_data = pd.concat([train_pitch, test_pitch], axis=0).drop(PITCH_REMOVAL_COLUMNS, axis=1)
 
     player_data = pd.concat([train_player, test_player], axis=0).drop(PLAYER_REMOVAL_COLUMNS, axis=1) #.fillna(0)
@@ -150,7 +151,7 @@ def main():
     ).drop(['選手ID', '投球位置区域'], axis=1).fillna(0)
 
     use = merged_data.loc[:, "use"]
-    merged_data = merged_data.drop(["use", "位置"], axis=1)
+    merged_data = merged_data.drop(["use", "位置", "年度"], axis=1)
 
     # category_encodersによってカテゴリ変数をencordingする
     categorical_columns = [c for c in merged_data.columns if merged_data[c].dtype == 'object']
@@ -173,23 +174,10 @@ def main():
     best_feature_count = study.best_params['n_features_to_select']
     selected_train_x, train_y = get_important_features(train_x, train_y, best_feature_count)
 
-    n_splits = 5
+    n_splits = 3
     num_class = 8
     best_params = get_best_params(selected_train_x, train_y, num_class) # 最適ハイパーパラメータの探索
 
-    # best_params = {
-    #     "objective": 'multiclass',
-    #     "boosting_type": 'gbdt',
-    #     "metric": 'multi_logloss',
-    #     'num_class':  num_class,
-    #     'learning_rate': 0.2,
-    #     'n_estimators': 50,
-    #     'min_data_in_leaf': 1000,
-    #     'num_leaves': 20,
-    #     'num_iterations' : 100,
-    #     'feature_fraction' : 0.7,
-    #     'max_depth' : 10
-    # }
     submission = np.zeros((len(test_x),num_class))
 
     kf = KFold(n_splits=n_splits, shuffle=True, random_state=0)
@@ -209,9 +197,10 @@ def main():
     print("#################################")
     print(submission_df)
     print(best_params) 
+    print(study.best_params)
     print("#################################")
     
-    submission_df.to_csv(f"{DATA_DIR}/my_submission13.csv", header=False)
+    submission_df.to_csv(f"{DATA_DIR}/my_submission14.csv", header=False)
 
 
 if __name__ == "__main__":
