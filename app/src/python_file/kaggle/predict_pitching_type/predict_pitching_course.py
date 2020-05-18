@@ -8,6 +8,8 @@ import typing as t
 import seaborn as sns
 import matplotlib as mpl
 import matplotlib.pyplot as plt
+import optuna #ハイパーパラメータチューニング自動化ライブラリ
+from optuna.integration import lightgbm_tuner #LightGBM用Stepwise Tuningに必要
 from python_file.kaggle.common import common_funcs as cf
 from sklearn.model_selection import train_test_split, KFold, StratifiedKFold, GridSearchCV, RandomizedSearchCV
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, LabelEncoder, OneHotEncoder
@@ -120,46 +122,28 @@ def label_encorder(col: pd.Series) -> pd.DataFrame:
 
 
 def get_best_params(train_x: t.Any, train_y: t.Any, num_class: int) -> t.Any:
+    tr_x, val_x, tr_y, val_y = train_test_split(train_x, train_y, test_size=0.2, random_state=0)
+    lgb_train = lgb.Dataset(tr_x, tr_y)
+    lgb_eval = lgb.Dataset(val_x, val_y)
     best_params = {}
-    gbm = lgb.LGBMClassifier(
-        objective="multiclass",
-        boosting_type= 'gbdt', 
-        n_jobs=4
-    )
-    grid_params = {
-        'learning_rate': [0.1, 0.2],
-        'n_estimators': [10, 50, 100],
-        'min_data_in_leaf': [500, 1000],
-        'num_leaves': [10, 20, 50],
-        'num_iterations' : [100],
-        'feature_fraction' : [0.7],
-        'max_depth' : [10]
+    params = {
+        'objective': 'multiclass',
+        'metric': 'multi_logloss',
+        'boosting_type': 'gbdt', 
+        'num_class': num_class,
     }
-    grid_search = GridSearchCV(
-        gbm, # 分類器,
-        param_grid=grid_params, # 試したいパラメータの渡し方
-        cv=5, # 5分割交差検証
+    best_params = {}
+    tuning_history = []
+    gbm = lightgbm_tuner.train(
+        params,
+        lgb_train,
+        valid_sets=lgb_eval,
+        num_boost_round=500,
+        early_stopping_rounds=5,
+        verbose_eval=10,
+        best_params=best_params,
+        tuning_history=tuning_history
     )
-    grid_search.fit(
-        train_x,
-        train_y,
-    )
-    print("#################################")
-    print(grid_search.best_score_)
-    print(grid_search.best_params_) 
-    print("#################################")
-    
-    best_params['learning_rate'] = grid_search.best_params_['learning_rate']
-    best_params['min_data_in_leaf'] = grid_search.best_params_['min_data_in_leaf']
-    best_params['n_estimators'] = grid_search.best_params_['n_estimators']
-    best_params['num_leaves'] = grid_search.best_params_['num_leaves']
-    best_params['num_iterations'] = grid_search.best_params_['num_iterations']
-    best_params['feature_fraction'] = grid_search.best_params_['feature_fraction']
-    best_params['max_depth'] = grid_search.best_params_['max_depth']
-    best_params["objective"] = 'multiclass'
-    best_params["boosting_type"] = 'gbdt'
-    best_params["metric"] = 'multi_logloss'
-    best_params['num_class'] = num_class
     return best_params
 
 
@@ -169,6 +153,7 @@ def get_model(tr_dataset: t.Any, val_dataset: t.Any, params: t.Dict[str, t.Any])
         train_set=tr_dataset,
         valid_sets=val_dataset,
         early_stopping_rounds=5,
+        num_boost_round=500,
     )
     return model
 
@@ -218,20 +203,8 @@ def main():
 
     n_splits = 3
     num_class = 13
-    # best_params = get_best_params(train_x, train_y, num_class) # 最適ハイパーパラメータの探索
-    best_params = {
-        'objective': 'multiclass',
-        'boosting_type': 'gbdt',
-        'metric': 'multi_logloss',
-        'num_class': num_class,
-        'learning_rate': 0.1,
-        'n_estimators': 10000,
-        'min_data_in_leaf': 2000,
-        'num_leaves': 10,
-        'num_iterations' : 1000,
-        'feature_fraction' : 0.7,
-        'max_depth' : 10
-    }
+    best_params = get_best_params(train_x, train_y, num_class) # 最適ハイパーパラメータの探索
+    
     submission = np.zeros((len(test_x),num_class))
     importances = pd.DataFrame(np.zeros(len(test_x.columns)), index=test_x.columns, columns=['importance'])
     kf = KFold(n_splits=n_splits, shuffle=True, random_state=0)
@@ -257,7 +230,7 @@ def main():
     print(importances_df)
     print("#################################")
     
-    submission_df.to_csv(f"{DATA_DIR}/submission_pitching_course3.csv", header=False)
+    submission_df.to_csv(f"{DATA_DIR}/submission_pitching_course4.csv", header=False)
 
 
 if __name__ == "__main__":
