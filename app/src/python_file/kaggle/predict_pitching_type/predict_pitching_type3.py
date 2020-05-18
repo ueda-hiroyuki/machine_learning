@@ -59,7 +59,7 @@ def get_best_params(train_x: t.Any, train_y: t.Any, num_class: int) -> t.Any:
         params,
         lgb_train,
         valid_sets=lgb_eval,
-        num_boost_round=500,
+        num_boost_round=1000,
         early_stopping_rounds=5,
         verbose_eval=10,
         best_params=best_params,
@@ -73,7 +73,7 @@ def get_model(tr_dataset: t.Any, val_dataset: t.Any, params: t.Dict[str, t.Any])
         train_set=tr_dataset,
         valid_sets=val_dataset,
         early_stopping_rounds=5,
-        num_boost_round=500,
+        num_boost_round=1000,
     )
     return model
 
