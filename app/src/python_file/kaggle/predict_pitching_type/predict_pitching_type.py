@@ -1,5 +1,6 @@
 import gc
 import logging
+import collections
 import typing as t
 import pandas as pd
 import numpy as np
@@ -17,7 +18,7 @@ from python_file.kaggle.common import common_funcs as cf
 from sklearn.feature_selection import RFE
 from sklearn.model_selection import train_test_split, KFold, StratifiedKFold, cross_val_predict
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, LabelEncoder, OneHotEncoder
-from sklearn.metrics import mean_squared_error, r2_score, accuracy_score
+from sklearn.metrics import mean_squared_error, r2_score, accuracy_score, roc_auc_score, precision_recall_curve, auc
 
 
 """
@@ -98,15 +99,14 @@ def objective(X, y, trial):
     val_x_selected = val_x.loc[:, selected_cols]
     gbm.fit(tr_x_selected, tr_y)
     y_pred = gbm.predict(val_x_selected)
-    # y_pred = cross_val_predict(
-    #     gbm, 
-    #     tr_x_selected, 
-    #     tr_y,
-    #     cv=3,
-    #     method='predict'
-    # )
-    accuracy = accuracy_score(val_y, y_pred)
-    return accuracy
+    print("##########################")
+    print(val_y, val_y.shape, y_pred, y_pred.shape)
+    print(collections.Counter(y_pred))
+    print("##########################")
+
+    precision, recall, thresholds = precision_recall_curve(val_y, y_pred, pos_label=8)
+    area = auc(recall, precision)
+    return area
 
 def get_important_features(train_x: t.Any, train_y: t.Any, best_feature_count: int):
     gbm = lgb.LGBMClassifier(
@@ -179,6 +179,7 @@ def main():
     best_params = get_best_params(selected_train_x, train_y, num_class) # 最適ハイパーパラメータの探索
 
     submission = np.zeros((len(test_x),num_class))
+    auc_score = 0
 
     kf = KFold(n_splits=n_splits, shuffle=True, random_state=0)
     for tr_idx, val_idx in kf.split(train_x, train_y):
@@ -190,17 +191,24 @@ def main():
         tr_dataset = lgb.Dataset(tr_x, tr_y)
         val_dataset = lgb.Dataset(val_x, val_y, reference=tr_dataset)
         model = get_model(tr_dataset, val_dataset, best_params)
+        y_preda = model.predict(val_x)
+        precision, recall, thresholds = precision_recall_curve(val_y, y_preda)
+        area = auc(recall, precision)
+        auc_score += area
         y_pred = model.predict(test_x, num_iteration=model.best_iteration)
+        
         submission += y_pred
 
     submission_df = pd.DataFrame(submission/n_splits)
+    auc_score_avg = auc_score/n_splits
     print("#################################")
     print(submission_df)
     print(best_params) 
     print(study.best_params)
+    print(auc_score_avg)
     print("#################################")
     
-    submission_df.to_csv(f"{DATA_DIR}/my_submission14.csv", header=False)
+    submission_df.to_csv(f"{DATA_DIR}/my_submission16.csv", header=False)
 
 
 if __name__ == "__main__":
