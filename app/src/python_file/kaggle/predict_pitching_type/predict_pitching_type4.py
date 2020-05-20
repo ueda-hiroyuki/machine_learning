@@ -13,6 +13,7 @@ import category_encoders as ce # カテゴリ変数encording用ライブラリ
 import optuna #ハイパーパラメータチューニング自動化ライブラリ
 from optuna.integration import lightgbm_tuner #LightGBM用Stepwise Tuningに必要
 from sklearn.impute import SimpleImputer 
+from sklearn.decomposition import PCA
 from functools import partial
 from python_file.kaggle.common import common_funcs as cf
 from sklearn.feature_selection import RFE
@@ -72,7 +73,7 @@ def get_best_params(train_x: t.Any, train_y: t.Any, num_class: int) -> t.Any:
         params,
         lgb_train,
         valid_sets=lgb_eval,
-        num_boost_round=1000,
+        num_boost_round=10000,
         early_stopping_rounds=20,
         verbose_eval=10,
         best_params=best_params,
@@ -87,7 +88,7 @@ def get_model(tr_dataset: t.Any, val_dataset: t.Any, params: t.Dict[str, t.Any])
         train_set=tr_dataset,
         valid_sets=[val_dataset, tr_dataset],
         early_stopping_rounds=20,
-        num_boost_round=1000,
+        num_boost_round=10000,
         valid_names=['eval','train'],
         evals_result=evals_result,
         feval=accuracy,
@@ -96,41 +97,31 @@ def get_model(tr_dataset: t.Any, val_dataset: t.Any, params: t.Dict[str, t.Any])
 
 def objective(X, y, trial):
     """最適化する目的関数"""
-    tr_x, val_x, tr_y, val_y = train_test_split(X, y, random_state=1)
     gbm = lgb.LGBMClassifier(
         objective="multiclass",
         boosting_type= 'gbdt', 
         n_jobs = 4,
-        n_estimators=1000,
+        n_estimators=10000,
     )
-    # RFE で取り出す特徴量の数を最適化する
-    n_features_to_select = trial.suggest_int('n_features_to_select', 1, len(list(tr_x.columns))),
-    rfe = RFE(estimator=gbm, n_features_to_select=n_features_to_select)
-    rfe.fit(tr_x, tr_y)
-    selected_cols = list(tr_x.columns[rfe.support_])
-    
-    tr_x_selected = tr_x.loc[:, selected_cols]
-    val_x_selected = val_x.loc[:, selected_cols]
+    n_components = trial.suggest_int('n_components', 1, len(list(X.columns))),
+    pca = PCA(n_components=n_components[0]).fit(X)
+    x_pca = pca.transform(X)
+    tr_x, val_x, tr_y, val_y = train_test_split(x_pca, y, random_state=1)
     gbm.fit(
-        tr_x_selected, 
+        tr_x, 
         tr_y,
-        eval_set=[(val_x_selected, val_y)],
-        early_stopping_rounds=20
+        eval_set=[(val_x, val_y)],
+        early_stopping_rounds=20,
+        verbose=50
     )
-    y_pred = gbm.predict(val_x_selected)
-    f1 = f1_score(val_y, y_pred, average="micro")
-    return f1
+    y_pred = gbm.predict(val_x)
+    accuracy = accuracy_score(val_y, y_pred)
+    return accuracy
 
 def get_important_features(train_x: t.Any, train_y: t.Any, best_feature_count: int):
-    gbm = lgb.LGBMClassifier(
-        objective="multiclass",
-        boosting_type= 'gbdt', 
-        n_jobs = 4,
-    )
-    selector = RFE(gbm, n_features_to_select=best_feature_count)
-    selector.fit(train_x, train_y) # 学習データを渡す
-    selected_train_x = pd.DataFrame(selector.transform(train_x), columns=train_x.columns[selector.support_])
-    return selected_train_x, train_y
+    pca = PCA(n_components=best_feature_count).fit(train_x)
+    x_pca = pca.transform(train_x)
+    return x_pca, train_y
 
 
 def main():
@@ -183,32 +174,18 @@ def main():
 
     study.optimize(f, n_trials=10) # 試行回数を決定する
     print('params:', study.best_params)# 発見したパラメータを出力する
-    best_feature_count = study.best_params['n_features_to_select']
-    selected_train_x, train_y = get_important_features(train_x, train_y, best_feature_count)  
-    # selected_train_x = train_x
+    best_feature_count = study.best_params['n_components']
+    x_pca, train_y = get_important_features(train_x, train_y, best_feature_count)  
 
     n_splits = 10
     num_class = 8
-    best_params = get_best_params(selected_train_x, train_y, num_class) # 最適ハイパーパラメータの探索
-    # best_params = {
-    #     "objective": 'multiclass',
-    #     "boosting_type": 'gbdt',
-    #     "metric": 'multi_logloss',
-    #     'num_class':  NUM_CLASS,
-    #     'learning_rate': 0.1,
-    #     'n_estimators': 500,
-    #     'min_data_in_leaf': 2000,
-    #     'num_leaves': 10,
-    #     'num_iterations' : 100,
-    #     'feature_fraction' : 0.7,
-    #     'max_depth' : 10
-    # }
+    best_params = get_best_params(x_pca, train_y, num_class) # 最適ハイパーパラメータの探索
 
     submission = np.zeros((len(test_x),num_class))
-    f1_scores = {}
+    accs = {}
 
     kf = KFold(n_splits=n_splits, shuffle=True, random_state=0)
-    for i, (tr_idx, val_idx) in enumerate(kf.split(train_x, train_y)):
+    for i, (tr_idx, val_idx) in enumerate(kf.split(x_pca, train_y)):
         tr_x = train_x.iloc[tr_idx].reset_index(drop=True)
         tr_y = train_y.iloc[tr_idx].reset_index(drop=True)
         val_x = train_x.iloc[val_idx].reset_index(drop=True)
@@ -237,11 +214,10 @@ def main():
         plt.savefig(f'{DATA_DIR}/learning_{i}.png')
 
         y_pred = np.argmax(model.predict(val_x), axis=1) # 0~8の確率
-        f1 = f1_score(val_y, y_pred, average="micro")
-        f1_scores[i] = f1
+        acc = accuracy_score(val_y, y_pred)
+        accs[i] = acc
         print("#################################")
-        print(collections.Counter(y_pred))
-        print(f"f1_score: {f1}")
+        print(f"accuracy: {acc}")
         print("#################################")
         y_preda = model.predict(test_x, num_iteration=model.best_iteration) # 0~8の確率
         submission += y_preda
@@ -250,11 +226,11 @@ def main():
     print("#################################")
     print(submission_df)
     print(best_params) 
-    print(f1_scores)
+    print(accs)
     print(study.best_params)
     print("#################################")
     
-    submission_df.to_csv(f"{DATA_DIR}/my_submission16.csv", header=False)
+    submission_df.to_csv(f"{DATA_DIR}/my_submission17.csv", header=False)
 
 
 if __name__ == "__main__":

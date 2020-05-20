@@ -13,7 +13,7 @@ from optuna.integration import lightgbm_tuner #LightGBM用Stepwise Tuningに必�
 from python_file.kaggle.common import common_funcs as cf
 from sklearn.model_selection import train_test_split, KFold, StratifiedKFold, GridSearchCV, RandomizedSearchCV
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, LabelEncoder, OneHotEncoder
-from sklearn.metrics import mean_squared_error, r2_score
+from sklearn.metrics import mean_squared_error, r2_score, accuracy_score
 
 
 """
@@ -38,9 +38,17 @@ TRAIN_PLAYER_PATH = f"{DATA_DIR}/train_player.csv"
 TEST_PITCH_PATH = f"{DATA_DIR}/test_pitch.csv"
 TEST_PLAYER_PATH = f"{DATA_DIR}/test_player.csv"
 SUBMISSION_PATH = f"{DATA_DIR}/sample_submit_ball_type.csv"
-PITCH_REMOVAL_COLUMNS = ["イニング", "投手役割", "打席内投球数", "投手試合内投球数", "投手イニング内投球数", "プレイ前走者状況", "イニング内打席数", "日付", "時刻", "試合内連番", "成績対象打者ID", "成績対象投手ID", "打者試合内打席数", "試合ID", "試合内投球数"]
-PLAYER_REMOVAL_COLUMNS = ["投", "出身高校名", "出身大学名", "生年月日", "位置", "出身地", "出身国", "チームID", "社会人","ドラフト年","ドラフト種別","ドラフト順位", "年俸", "育成選手F"]
+PITCH_REMOVAL_COLUMNS = ["日付", "時刻", "試合内連番", "成績対象打者ID", "成績対象投手ID", "打者試合内打席数", "試合ID", "試合内投球数"]
+PLAYER_REMOVAL_COLUMNS = ["出身高校名", "出身大学名", "生年月日", "位置", "出身地", "出身国", "チームID", "社会人","ドラフト年","ドラフト種別","ドラフト順位", "年俸", "育成選手F"]
 
+
+def accuracy(preds, data):
+    """精度 (Accuracy) を計算する関数"""
+    y_true = data.get_label()
+    y_preds = np.reshape(preds, [len(y_true), 8], order='F')
+    y_pred = np.argmax(y_preds, axis=1)
+    metric = np.mean(y_true == y_pred)
+    return 'accuracy', metric, True
 
 def get_best_params(train_x: t.Any, train_y: t.Any, num_class: int) -> t.Any:
     tr_x, val_x, tr_y, val_y = train_test_split(train_x, train_y, test_size=0.2, random_state=0)
@@ -68,14 +76,19 @@ def get_best_params(train_x: t.Any, train_y: t.Any, num_class: int) -> t.Any:
     return best_params
 
 def get_model(tr_dataset: t.Any, val_dataset: t.Any, params: t.Dict[str, t.Any]) -> t.Any:
+    evals_result = {}
     model = lgb.train(
         params=params,
         train_set=tr_dataset,
-        valid_sets=val_dataset,
-        early_stopping_rounds=5,
-        num_boost_round=1000,
+        valid_sets=[val_dataset, tr_dataset],
+        #early_stopping_rounds=5,
+        num_boost_round=500,
+        valid_names=['eval','train'],
+        evals_result=evals_result,
+        feval=accuracy,
     )
-    return model
+    return model, evals_result
+
 
 def main():
     train_pitch = pd.read_csv(TRAIN_PITCH_PATH)
@@ -113,14 +126,26 @@ def main():
 
     # cf.check_corr(train_x, "predict_pitching_type")
 
-    n_splits = 3
+    n_splits = 10
     num_class = 8
-    best_params = get_best_params(train_x, train_y, num_class) # 最適ハイパーパラメータの探索
-
+    # best_params = get_best_params(train_x, train_y, num_class) # 最適ハイパーパラメータの探索
+    best_params = {
+        "objective": 'multiclass',
+        "boosting_type": 'gbdt',
+        "metric": 'multi_logloss',
+        'num_class':  num_class,
+        'learning_rate': 0.1,
+        'n_estimators': 1000,
+        'min_data_in_leaf': 2000,
+        'num_leaves': 10,
+        'num_iterations' : 1000,
+        'feature_fraction' : 0.7,
+        'max_depth' : 10
+    }
     submission = np.zeros((len(test_x),num_class))
-
+    accs = {}
     kf = KFold(n_splits=n_splits, shuffle=True, random_state=0)
-    for tr_idx, val_idx in kf.split(train_x, train_y):
+    for i, (tr_idx, val_idx) in enumerate(kf.split(train_x, train_y)):
         tr_x = train_x.iloc[tr_idx].reset_index(drop=True)
         tr_y = train_y.iloc[tr_idx].reset_index(drop=True)
         val_x = train_x.iloc[val_idx].reset_index(drop=True)
@@ -128,14 +153,40 @@ def main():
 
         tr_dataset = lgb.Dataset(tr_x, tr_y)
         val_dataset = lgb.Dataset(val_x, val_y, reference=tr_dataset)
-        model = get_model(tr_dataset, val_dataset, best_params)
-        y_pred = model.predict(test_x, num_iteration=model.best_iteration)
-        submission += y_pred
+        model, evals_result = get_model(tr_dataset, val_dataset, best_params)
+
+        # 学習曲線の描画
+        eval_metric_logloss = evals_result['eval']['multi_logloss']
+        train_metric_logloss = evals_result['train']['multi_logloss']
+        eval_metric_acc = evals_result['eval']['accuracy']
+        train_metric_acc = evals_result['train']['accuracy']
+        _, ax1 = plt.subplots()
+        ax1.plot(eval_metric_logloss, label='eval logloss', c='r')
+        ax1.plot(train_metric_logloss, label='train logloss', c='b')
+        ax1.set_ylabel('logloss')
+        ax1.set_xlabel('rounds')
+        ax1.legend(loc='upper right')
+        ax2 = ax1.twinx()
+        ax2.plot(eval_metric_acc, label='eval accuracy', c='g')
+        ax2.plot(train_metric_acc, label='train accuracy', c='y')
+        ax2.set_ylabel('accuracy')
+        ax2.legend(loc='lower right')
+        plt.savefig(f'{DATA_DIR}/learning_{i}.png')
+
+        y_pred = np.argmax(model.predict(val_x), axis=1) # 0~8の確率
+        acc = accuracy_score(val_y, y_pred)
+        accs[i] = acc
+        print("#################################")
+        print(f"accuracy_score: {acc}")
+        print("#################################")
+        y_preda = model.predict(test_x, num_iteration=model.best_iteration) # 0~8の確率
+        submission += y_preda
 
     submission_df = pd.DataFrame(submission/n_splits)
     print("#################################")
     print(submission_df)
     print(best_params) 
+    print(accs)
     print("#################################")
     
     submission_df.to_csv(f"{DATA_DIR}/my_submission15.csv", header=False)
