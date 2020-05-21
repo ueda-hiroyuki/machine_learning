@@ -61,6 +61,7 @@ HeapDict==1.0.1
 htmlmin==0.1.12
 idna==2.8
 imageio==2.8.0
+imbalanced-learn==0.6.2
 imgaug==0.2.6
 importlib-metadata==1.6.0
 ipykernel==5.2.1
@@ -80,7 +81,7 @@ Keras-Applications==1.0.8
 Keras-Preprocessing==1.1.0
 kiwisolver==1.1.0
 kmodes==0.10.1
-lightgbm==2.3.1
+lightgbm==2.2.3
 llvmlite==0.32.1
 locket==0.2.0
 Mako==1.1.2

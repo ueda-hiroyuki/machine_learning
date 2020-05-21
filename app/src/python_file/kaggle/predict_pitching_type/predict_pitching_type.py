@@ -14,6 +14,7 @@ import optuna #ハイパーパラメータチューニング自動化ライブ�
 from optuna.integration import lightgbm_tuner #LightGBM用Stepwise Tuningに必要
 from sklearn.impute import SimpleImputer 
 from functools import partial
+from sklearn.manifold import TSNE
 from python_file.kaggle.common import common_funcs as cf
 from sklearn.feature_selection import RFE
 from sklearn.model_selection import train_test_split, KFold, StratifiedKFold, cross_val_predict
@@ -72,9 +73,9 @@ def get_best_params(train_x: t.Any, train_y: t.Any, num_class: int) -> t.Any:
         params,
         lgb_train,
         valid_sets=lgb_eval,
-        num_boost_round=1000,
+        num_boost_round=10000,
         early_stopping_rounds=20,
-        verbose_eval=10,
+        verbose_eval=50,
         best_params=best_params,
         tuning_history=tuning_history
     )
@@ -87,7 +88,8 @@ def get_model(tr_dataset: t.Any, val_dataset: t.Any, params: t.Dict[str, t.Any])
         train_set=tr_dataset,
         valid_sets=[val_dataset, tr_dataset],
         early_stopping_rounds=20,
-        num_boost_round=1000,
+        num_boost_round=10000,
+        verbose_eval=50,
         valid_names=['eval','train'],
         evals_result=evals_result,
         feval=accuracy,
@@ -100,8 +102,8 @@ def objective(X, y, trial):
     gbm = lgb.LGBMClassifier(
         objective="multiclass",
         boosting_type= 'gbdt', 
-        n_jobs = 4,
-        n_estimators=1000,
+        #n_jobs = 4,
+        n_estimators=10000,
     )
     # RFE で取り出す特徴量の数を最適化する
     n_features_to_select = trial.suggest_int('n_features_to_select', 1, len(list(tr_x.columns))),
@@ -118,14 +120,14 @@ def objective(X, y, trial):
         early_stopping_rounds=20
     )
     y_pred = gbm.predict(val_x_selected)
-    f1 = f1_score(val_y, y_pred, average="micro")
-    return f1
+    accuracy = accuracy_score(val_y, y_pred)
+    return accuracy
 
 def get_important_features(train_x: t.Any, train_y: t.Any, best_feature_count: int):
     gbm = lgb.LGBMClassifier(
         objective="multiclass",
         boosting_type= 'gbdt', 
-        n_jobs = 4,
+        #n_jobs = 4,
     )
     selector = RFE(gbm, n_features_to_select=best_feature_count)
     selector.fit(train_x, train_y) # 学習データを渡す
@@ -162,18 +164,21 @@ def main():
         right_on=['年度','選手ID'],
     ).drop(['選手ID', '投球位置区域'], axis=1).fillna(0)
 
+    labal = merged_data.loc[:, "球種"]
     use = merged_data.loc[:, "use"]
-    merged_data = merged_data.drop(["use", "位置", "年度"], axis=1)
+    merged_data = merged_data.drop(["use", "位置", "年度", "球種"], axis=1)
 
     # category_encodersによってカテゴリ変数をencordingする
     categorical_columns = [c for c in merged_data.columns if merged_data[c].dtype == 'object']
-    ce_oe = ce.OrdinalEncoder(cols=categorical_columns, handle_unknown='impute')
-    encorded_data = ce_oe.fit_transform(merged_data) 
-    encorded_data = pd.concat([encorded_data, use], axis=1)
+    ce_ohe = ce.OneHotEncoder(cols=categorical_columns, handle_unknown='impute') # one_hot_encording
+    encorded_data = ce_ohe.fit_transform(merged_data)
+    # x_reduced = TSNE(n_components=2, random_state=1).fit_transform(encorded_data)
+    # x_reduced_df = pd.DataFrame(x_reduced, columns=["tnse_x", "tnse_y"])
+    dataset = pd.concat([encorded_data, use, labal], axis=1)
  
-    train = encorded_data[encorded_data["use"] == "train"].drop("use", axis=1).reset_index(drop=True)
-    test = encorded_data[encorded_data["use"] == "test"].drop("use", axis=1).reset_index(drop=True)
-
+    train = dataset[dataset["use"] == "train"].drop("use", axis=1).reset_index(drop=True)
+    test = dataset[dataset["use"] == "test"].drop("use", axis=1).reset_index(drop=True)
+    
     train_x = train.drop("球種", axis=1)
     train_y = train.loc[:,"球種"]
     test_x = test.drop("球種", axis=1)
@@ -181,31 +186,17 @@ def main():
     f = partial(objective, train_x, train_y) # 目的関数に引数を固定しておく
     study = optuna.create_study(direction='maximize') # Optuna で取り出す特徴量の数を最適化する
 
-    study.optimize(f, n_trials=10) # 試行回数を決定する
+    study.optimize(f, n_trials=20) # 試行回数を決定する
     print('params:', study.best_params)# 発見したパラメータを出力する
     best_feature_count = study.best_params['n_features_to_select']
     selected_train_x, train_y = get_important_features(train_x, train_y, best_feature_count)  
-    # selected_train_x = train_x
 
     n_splits = 10
     num_class = 8
-    best_params = get_best_params(selected_train_x, train_y, num_class) # 最適ハイパーパラメータの探索
-    # best_params = {
-    #     "objective": 'multiclass',
-    #     "boosting_type": 'gbdt',
-    #     "metric": 'multi_logloss',
-    #     'num_class':  NUM_CLASS,
-    #     'learning_rate': 0.1,
-    #     'n_estimators': 500,
-    #     'min_data_in_leaf': 2000,
-    #     'num_leaves': 10,
-    #     'num_iterations' : 100,
-    #     'feature_fraction' : 0.7,
-    #     'max_depth' : 10
-    # }
+    best_params = get_best_params(selected_train_x, train_y, num_class) # 最適ハイパーパラメータの探
 
     submission = np.zeros((len(test_x),num_class))
-    f1_scores = {}
+    acc_scores = {}
 
     kf = KFold(n_splits=n_splits, shuffle=True, random_state=0)
     for i, (tr_idx, val_idx) in enumerate(kf.split(train_x, train_y)):
@@ -237,11 +228,10 @@ def main():
         plt.savefig(f'{DATA_DIR}/learning_{i}.png')
 
         y_pred = np.argmax(model.predict(val_x), axis=1) # 0~8の確率
-        f1 = f1_score(val_y, y_pred, average="micro")
-        f1_scores[i] = f1
+        acc = accuracy_score(val_y, y_pred, average="micro")
+        acc_scores[i] = acc
         print("#################################")
-        print(collections.Counter(y_pred))
-        print(f"f1_score: {f1}")
+        print(f"acc_scores: {acc}")
         print("#################################")
         y_preda = model.predict(test_x, num_iteration=model.best_iteration) # 0~8の確率
         submission += y_preda
@@ -250,7 +240,7 @@ def main():
     print("#################################")
     print(submission_df)
     print(best_params) 
-    print(f1_scores)
+    print(acc_scores)
     print(study.best_params)
     print("#################################")
     
