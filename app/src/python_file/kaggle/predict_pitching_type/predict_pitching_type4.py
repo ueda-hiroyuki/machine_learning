@@ -14,9 +14,6 @@ import optuna #ハイパーパラメータチューニング自動化ライブ�
 from optuna.integration import lightgbm_tuner #LightGBM用Stepwise Tuningに必要
 from sklearn.impute import SimpleImputer 
 from sklearn.decomposition import PCA
-from imblearn.datasets import make_imbalance
-from imblearn.over_sampling import RandomOverSampler, SMOTE
-from imblearn.under_sampling import RandomUnderSampler
 from functools import partial
 from python_file.kaggle.common import common_funcs as cf
 from sklearn.feature_selection import RFE
@@ -46,7 +43,7 @@ TEST_PITCH_PATH = f"{DATA_DIR}/test_pitch.csv"
 TEST_PLAYER_PATH = f"{DATA_DIR}/test_player.csv"
 SUBMISSION_PATH = f"{DATA_DIR}/sample_submit_ball_type.csv"
 
-PITCH_REMOVAL_COLUMNS = ["日付", "時刻", "試合内連番", "成績対象打者ID", "成績対象投手ID", "打者試合内打席数", "試合ID"]
+PITCH_REMOVAL_COLUMNS = ["日付", "時刻", "試合内連番", "成績対象打者ID", "成績対象投手ID", "打者試合内打席数"]
 PLAYER_REMOVAL_COLUMNS = ["出身高校名", "出身大学名", "生年月日", "出身地", "出身国", "チームID", "社会人","ドラフト年","ドラフト種別","ドラフト順位", "年俸", "育成選手F"]
 
 NUM_CLASS = 8
@@ -185,90 +182,92 @@ def main():
     categorical_columns = [c for c in merged_data.columns if merged_data[c].dtype == 'object']
     ce_oe = ce.OrdinalEncoder(cols=categorical_columns, handle_unknown='impute')
     encorded_data = ce_oe.fit_transform(merged_data) 
-    encorded_data = pd.concat([encorded_data, use], axis=1)
+    encorded_data = pd.concat([encorded_data, use, labal], axis=1)
 
-    rus = RandomUnderSampler(random_state=1)
-    X, y = rus.fit_resample(encorded_data, labal)
-    new_use = X.loc[:, "use"]
-    X = X.drop(["use"], axis=1)
+    cf.check_corr(encorded_data, "predict_pitching_type")
 
-    x_reduced = TSNE(n_components=2, random_state=1).fit_transform(X)
-    x_reduced_df = pd.DataFrame(x_reduced, columns=["tnse_x", "tnse_y"])
+    # rus = RandomUnderSampler(random_state=1)
+    # X, y = rus.fit_resample(encorded_data, labal)
+    # new_use = X.loc[:, "use"]
+    # X = X.drop(["use"], axis=1)
 
-    dataset = pd.concat([X, x_reduced_df], axis=1)
-    dataset = cf.standardize(dataset) # 標準化
-    dataset = pd.concat([dataset, new_use, labal], axis=1)
+    # x_reduced = TSNE(n_components=2, random_state=1).fit_transform(X)
+    # x_reduced_df = pd.DataFrame(x_reduced, columns=["tnse_x", "tnse_y"])
 
-    train = dataset[dataset["use"] == "train"].drop("use", axis=1).reset_index(drop=True)
-    test = dataset[dataset["use"] == "test"].drop("use", axis=1).reset_index(drop=True)
+    # dataset = pd.concat([X, x_reduced_df], axis=1)
+    # dataset = cf.standardize(dataset) # 標準化
+    # dataset = pd.concat([dataset, new_use, labal], axis=1)
 
-    train_x = train.drop("球種", axis=1)
-    train_y = train.loc[:,"球種"]
-    test_x = test.drop("球種", axis=1)
+    # train = dataset[dataset["use"] == "train"].drop("use", axis=1).reset_index(drop=True)
+    # test = dataset[dataset["use"] == "test"].drop("use", axis=1).reset_index(drop=True)
 
-    print(train_x, train_y, test_x)
+    # train_x = train.drop("球種", axis=1)
+    # train_y = train.loc[:,"球種"]
+    # test_x = test.drop("球種", axis=1)
+
+    # print(train_x, train_y, test_x)
     
 
-    f = partial(objective, train_x, train_y) # 目的関数に引数を固定しておく
-    study = optuna.create_study(direction='maximize') # Optuna で取り出す特徴量の数を最適化する
+    # f = partial(objective, train_x, train_y) # 目的関数に引数を固定しておく
+    # study = optuna.create_study(direction='maximize') # Optuna で取り出す特徴量の数を最適化する
 
-    study.optimize(f, n_trials=20) # 試行回数を決定する
-    study_result = study.best_params
-    best_feature_count = study_result.pop('n_components')
-    best_params = study_result
-    x_pca, train_y = get_important_features(train_x, train_y, best_feature_count)  
-    # best_params = get_best_params(x_pca, train_y, num_class) # 最適ハイパーパラメータの探索
-    n_splits = 10
-    submission = np.zeros((len(test_x), NUM_CLASS))
-    accs = {}
+    # study.optimize(f, n_trials=20) # 試行回数を決定する
+    # study_result = study.best_params
+    # best_feature_count = study_result.pop('n_components')
+    # best_params = study_result
+    # x_pca, train_y = get_important_features(train_x, train_y, best_feature_count)  
+    # # best_params = get_best_params(x_pca, train_y, num_class) # 最適ハイパーパラメータの探索
+    # n_splits = 10
+    # submission = np.zeros((len(test_x), NUM_CLASS))
+    # accs = {}
 
-    skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=1)
-    for i, (tr_idx, val_idx) in enumerate(skf.split(x_pca, train_y)):
-        tr_x = train_x.iloc[tr_idx].reset_index(drop=True)
-        tr_y = train_y.iloc[tr_idx].reset_index(drop=True)
-        val_x = train_x.iloc[val_idx].reset_index(drop=True)
-        val_y = train_y.iloc[val_idx].reset_index(drop=True)
+    # skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=1)
+    # for i, (tr_idx, val_idx) in enumerate(skf.split(x_pca, train_y)):
+    #     tr_x = train_x.iloc[tr_idx].reset_index(drop=True)
+    #     tr_y = train_y.iloc[tr_idx].reset_index(drop=True)
+    #     val_x = train_x.iloc[val_idx].reset_index(drop=True)
+    #     val_y = train_y.iloc[val_idx].reset_index(drop=True)
 
-        tr_dataset = lgb.Dataset(tr_x, tr_y)
-        val_dataset = lgb.Dataset(val_x, val_y, reference=tr_dataset)
-        model, evals_result = get_model(tr_dataset, val_dataset, best_params)
+    #     tr_dataset = lgb.Dataset(tr_x, tr_y)
+    #     val_dataset = lgb.Dataset(val_x, val_y, reference=tr_dataset)
+    #     model, evals_result = get_model(tr_dataset, val_dataset, best_params)
         
-        # 学習曲線の描画
-        eval_metric_logloss = evals_result['eval']['multi_logloss']
-        train_metric_logloss = evals_result['train']['multi_logloss']
-        eval_metric_acc = evals_result['eval']['accuracy']
-        train_metric_acc = evals_result['train']['accuracy']
-        _, ax1 = plt.subplots(figsize=(8, 4))
-        ax1.plot(eval_metric_logloss, label='eval logloss', c='r')
-        ax1.plot(train_metric_logloss, label='train logloss', c='b')
-        ax1.set_ylabel('logloss')
-        ax1.set_xlabel('rounds')
-        ax1.legend(loc='upper right')
-        ax2 = ax1.twinx()
-        ax2.plot(eval_metric_acc, label='eval accuracy', c='g')
-        ax2.plot(train_metric_acc, label='train accuracy', c='y')
-        ax2.set_ylabel('accuracy')
-        ax2.legend(loc='lower right')
-        plt.savefig(f'{DATA_DIR}/learning_{i}.png')
+    #     # 学習曲線の描画
+    #     eval_metric_logloss = evals_result['eval']['multi_logloss']
+    #     train_metric_logloss = evals_result['train']['multi_logloss']
+    #     eval_metric_acc = evals_result['eval']['accuracy']
+    #     train_metric_acc = evals_result['train']['accuracy']
+    #     _, ax1 = plt.subplots(figsize=(8, 4))
+    #     ax1.plot(eval_metric_logloss, label='eval logloss', c='r')
+    #     ax1.plot(train_metric_logloss, label='train logloss', c='b')
+    #     ax1.set_ylabel('logloss')
+    #     ax1.set_xlabel('rounds')
+    #     ax1.legend(loc='upper right')
+    #     ax2 = ax1.twinx()
+    #     ax2.plot(eval_metric_acc, label='eval accuracy', c='g')
+    #     ax2.plot(train_metric_acc, label='train accuracy', c='y')
+    #     ax2.set_ylabel('accuracy')
+    #     ax2.legend(loc='lower right')
+    #     plt.savefig(f'{DATA_DIR}/learning_{i}.png')
 
-        y_pred = np.argmax(model.predict(val_x), axis=1) # 0~8の確率
-        acc = accuracy_score(val_y, y_pred)
-        accs[i] = acc
-        print("#################################")
-        print(f"accuracy: {acc}")
-        print("#################################")
-        y_preda = model.predict(test_x, num_iteration=model.best_iteration) # 0~8の確率
-        submission += y_preda
+    #     y_pred = np.argmax(model.predict(val_x), axis=1) # 0~8の確率
+    #     acc = accuracy_score(val_y, y_pred)
+    #     accs[i] = acc
+    #     print("#################################")
+    #     print(f"accuracy: {acc}")
+    #     print("#################################")
+    #     y_preda = model.predict(test_x, num_iteration=model.best_iteration) # 0~8の確率
+    #     submission += y_preda
 
-    submission_df = pd.DataFrame(submission/n_splits)
-    print("#################################")
-    print(submission_df)
-    print(best_params) 
-    print(accs)
-    print(study.best_params)
-    print("#################################")
+    # submission_df = pd.DataFrame(submission/n_splits)
+    # print("#################################")
+    # print(submission_df)
+    # print(best_params) 
+    # print(accs)
+    # print(study.best_params)
+    # print("#################################")
     
-    submission_df.to_csv(f"{DATA_DIR}/my_submission19.csv", header=False)
+    # submission_df.to_csv(f"{DATA_DIR}/my_submission19.csv", header=False)
 
 
 if __name__ == "__main__":

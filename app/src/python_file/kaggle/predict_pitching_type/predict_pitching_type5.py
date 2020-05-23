@@ -13,13 +13,16 @@ import category_encoders as ce # カテゴリ変数encording用ライブラリ
 import optuna #ハイパーパラメータチューニング自動化ライブラリ
 from optuna.integration import lightgbm_tuner #LightGBM用Stepwise Tuningに必要
 from sklearn.impute import SimpleImputer 
+from sklearn.decomposition import PCA
 from functools import partial
-from sklearn.manifold import TSNE
 from python_file.kaggle.common import common_funcs as cf
 from sklearn.feature_selection import RFE
+from sklearn.manifold import TSNE
 from sklearn.model_selection import train_test_split, KFold, StratifiedKFold, cross_val_predict
+from sklearn.ensemble import StackingClassifier
+from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, LabelEncoder, OneHotEncoder
-from sklearn.metrics import mean_squared_error, r2_score, accuracy_score, roc_auc_score, precision_recall_curve, auc, f1_score
+from sklearn.metrics import mean_squared_error, r2_score, accuracy_score, roc_auc_score, precision_recall_curve, auc, f1_score, cohen_kappa_score
 
 
 """
@@ -42,7 +45,7 @@ TEST_PITCH_PATH = f"{DATA_DIR}/test_pitch.csv"
 TEST_PLAYER_PATH = f"{DATA_DIR}/test_player.csv"
 SUBMISSION_PATH = f"{DATA_DIR}/sample_submit_ball_type.csv"
 
-PITCH_REMOVAL_COLUMNS = ["日付", "時刻", "試合内連番", "成績対象打者ID", "成績対象投手ID", "打者試合内打席数", "試合ID"]
+PITCH_REMOVAL_COLUMNS = ["日付", "時刻", "試合内連番", "成績対象打者ID", "成績対象投手ID", "打者試合内打席数"]
 PLAYER_REMOVAL_COLUMNS = ["出身高校名", "出身大学名", "生年月日", "出身地", "出身国", "チームID", "社会人","ドラフト年","ドラフト種別","ドラフト順位", "年俸", "育成選手F"]
 
 NUM_CLASS = 8
@@ -57,11 +60,9 @@ def accuracy(preds, data):
     return 'accuracy', metric, True
 
 def get_best_params(train_x: t.Any, train_y: t.Any, num_class: int) -> t.Any:
-    print("Start parameter tuning")
     tr_x, val_x, tr_y, val_y = train_test_split(train_x, train_y, test_size=0.2, random_state=1)
     lgb_train = lgb.Dataset(tr_x, tr_y)
     lgb_eval = lgb.Dataset(val_x, val_y)
-    best_params = {}
     params = {
         'objective': 'multiclass',
         'metric': 'multi_logloss',
@@ -80,10 +81,16 @@ def get_best_params(train_x: t.Any, train_y: t.Any, num_class: int) -> t.Any:
         best_params=best_params,
         tuning_history=tuning_history
     )
-    print("Finished parameter tuning")
     return best_params
 
 def get_model(tr_dataset: t.Any, val_dataset: t.Any, params: t.Dict[str, t.Any]) -> t.Any:
+    params = {
+        'objective': 'multiclass',
+        'metric': 'multi_logloss',
+        'boosting_type': 'gbdt', 
+        'num_class': NUM_CLASS,
+        **params
+    }
     evals_result = {}
     model = lgb.train(
         params=params,
@@ -91,9 +98,9 @@ def get_model(tr_dataset: t.Any, val_dataset: t.Any, params: t.Dict[str, t.Any])
         valid_sets=[val_dataset, tr_dataset],
         early_stopping_rounds=20,
         num_boost_round=10000,
-        verbose_eval=50,
         valid_names=['eval','train'],
         evals_result=evals_result,
+        verbose_eval=50,
         feval=accuracy,
     )
     return model, evals_result
@@ -110,7 +117,7 @@ def objective(X, y, trial):
     )
     # RFE で取り出す特徴量の数を最適化する
     n_features_to_select = trial.suggest_int('n_features_to_select', 1, len(list(tr_x.columns))),
-    rfe = RFE(estimator=gbm, n_features_to_select=n_features_to_select)
+    rfe = RFE(estimator=gbm, n_features_to_select=n_features_to_select, verbose=50, step=3)
     rfe.fit(tr_x, tr_y)
     selected_cols = list(tr_x.columns[rfe.support_])
     
@@ -123,8 +130,8 @@ def objective(X, y, trial):
         early_stopping_rounds=20
     )
     y_pred = gbm.predict(val_x_selected)
-    accuracy = accuracy_score(val_y, y_pred)
-    return accuracy
+    kappa = cohen_kappa_score(val_y, y_pred)
+    return kappa
 
 def get_important_features(train_x: t.Any, train_y: t.Any, best_feature_count: int):
     gbm = lgb.LGBMClassifier(
@@ -133,7 +140,7 @@ def get_important_features(train_x: t.Any, train_y: t.Any, best_feature_count: i
         #n_jobs = 4,
     )
     print("Start RFE")
-    selector = RFE(gbm, n_features_to_select=best_feature_count, step=5, verbose=50)
+    selector = RFE(gbm, n_features_to_select=best_feature_count, verbose=50)
     selector.fit(train_x, train_y) # 学習データを渡す
     print("Finished RFE")
     selected_train_x = pd.DataFrame(selector.transform(train_x), columns=train_x.columns[selector.support_])
@@ -177,77 +184,51 @@ def main():
     categorical_columns = [c for c in merged_data.columns if merged_data[c].dtype == 'object']
     ce_oe = ce.OrdinalEncoder(cols=categorical_columns, handle_unknown='impute')
     encorded_data = ce_oe.fit_transform(merged_data) 
-
-    selected_data, selected_label = get_important_features(encorded_data, labal, 10)  
-    dataset = pd.concat([selected_data, use, selected_label], axis=1)
- 
-    train = dataset[dataset["use"] == "train"].drop("use", axis=1).reset_index(drop=True)
-    test = dataset[dataset["use"] == "test"].drop("use", axis=1).reset_index(drop=True)
     
+
+    f = partial(objective, encorded_data, labal) # 目的関数に引数を固定しておく
+    study = optuna.create_study(direction='maximize') # Optuna で取り出す特徴量の数を最適化する
+    study.optimize(f, n_trials=10) # 試行回数を決定する
+    print('params:', study.best_params)# 発見したパラメータを出力する
+    best_feature_count = study.best_params['n_features_to_select']
+    selected_data, selected_label = get_important_features(encorded_data, labal, best_feature_count)
+    selected_data = pd.concat([selected_data, use, selected_label], axis=1)
+
+    train = selected_data[selected_data["use"] == "train"].drop("use", axis=1).reset_index(drop=True)
+    test = selected_data[selected_data["use"] == "test"].drop("use", axis=1).reset_index(drop=True)
+
     train_x = train.drop("球種", axis=1)
     train_y = train.loc[:,"球種"]
     test_x = test.drop("球種", axis=1)
 
-    # f = partial(objective, train_x, train_y) # 目的関数に引数を固定しておく
-    # study = optuna.create_study(direction='maximize') # Optuna で取り出す特徴量の数を最適化する
-    # study.optimize(f, n_trials=20) # 試行回数を決定する
-    # print('params:', study.best_params)# 発見したパラメータを出力する
-    # best_feature_count = study.best_params['n_features_to_select']
-
+    best_params = get_best_params(train_x, train_y, NUM_CLASS)
+    print(best_params)
+ 
     n_splits = 10
-    num_class = 8
-    best_params = get_best_params(train_x, train_y, num_class) # 最適ハイパーパラメータの探
+    submission = np.zeros((len(test_x), NUM_CLASS))
+    kappas = {}
+    skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=1)
 
-    submission = np.zeros((len(test_x),num_class))
-    acc_scores = {}
-
-    kf = KFold(n_splits=n_splits, shuffle=True, random_state=0)
-    for i, (tr_idx, val_idx) in enumerate(kf.split(train_x, train_y)):
-        tr_x = train_x.iloc[tr_idx].reset_index(drop=True)
-        tr_y = train_y.iloc[tr_idx].reset_index(drop=True)
-        val_x = train_x.iloc[val_idx].reset_index(drop=True)
-        val_y = train_y.iloc[val_idx].reset_index(drop=True)
-
-        tr_dataset = lgb.Dataset(tr_x, tr_y)
-        val_dataset = lgb.Dataset(val_x, val_y, reference=tr_dataset)
-        model, evals_result = get_model(tr_dataset, val_dataset, best_params)
-        
-        # 学習曲線の描画
-        eval_metric_logloss = evals_result['eval']['multi_logloss']
-        train_metric_logloss = evals_result['train']['multi_logloss']
-        eval_metric_acc = evals_result['eval']['accuracy']
-        train_metric_acc = evals_result['train']['accuracy']
-        _, ax1 = plt.subplots(figsize=(8, 4))
-        ax1.plot(eval_metric_logloss, label='eval logloss', c='r')
-        ax1.plot(train_metric_logloss, label='train logloss', c='b')
-        ax1.set_ylabel('logloss')
-        ax1.set_xlabel('rounds')
-        ax1.legend(loc='upper right')
-        ax2 = ax1.twinx()
-        ax2.plot(eval_metric_acc, label='eval accuracy', c='g')
-        ax2.plot(train_metric_acc, label='train accuracy', c='y')
-        ax2.set_ylabel('accuracy')
-        ax2.legend(loc='lower right')
-        plt.savefig(f'{DATA_DIR}/learning_{i}.png')
-
-        y_pred = np.argmax(model.predict(val_x), axis=1) # 0~8の確率
-        acc = accuracy_score(val_y, y_pred)
-        acc_scores[i] = acc
-        print("#################################")
-        print(f"acc_scores: {acc}")
-        print("#################################")
-        y_preda = model.predict(test_x, num_iteration=model.best_iteration) # 0~8の確率
-        submission += y_preda
-
-    submission_df = pd.DataFrame(submission/n_splits)
-    print("#################################")
-    print(submission_df)
-    print(best_params) 
-    print(acc_scores)
-    # print(study.best_params)
-    print("#################################")
-    
-    submission_df.to_csv(f"{DATA_DIR}/my_submission16.csv", header=False)
+    estimators = [
+        (
+            'lgb', 
+            lgb.LGBMClassifier(**best_params, verbose=10)
+        ),
+        (
+            'lr', 
+            LogisticRegression(
+                penalty='l2',
+                max_iter=1000,
+            )
+        ),
+    ]
+    fin_est = LogisticRegression(penalty='l2',max_iter=10)
+    clf = StackingClassifier(estimators=estimators, final_estimator=fin_est, cv=skf, verbose=10)
+    clf.fit(train_x, train_y)
+    predictions = clf.predict_proba(test_x)
+    submission = pd.DataFrame(predictions)
+    print(submission)
+    submission.to_csv(f"{DATA_DIR}/my_submission20.csv", header=False)
 
 
 if __name__ == "__main__":
