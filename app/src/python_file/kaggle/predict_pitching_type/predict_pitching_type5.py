@@ -16,10 +16,11 @@ from sklearn.impute import SimpleImputer
 from sklearn.decomposition import PCA
 from functools import partial
 from python_file.kaggle.common import common_funcs as cf
-from sklearn.feature_selection import RFE
+from sklearn.feature_selection import RFE, RFECV
 from sklearn.manifold import TSNE
-from sklearn.model_selection import train_test_split, KFold, StratifiedKFold, cross_val_predict
-from sklearn.ensemble import StackingClassifier
+from sklearn.model_selection import train_test_split, KFold, StratifiedKFold, cross_val_predict, cross_val_score
+from sklearn.ensemble import StackingClassifier, GradientBoostingClassifier, RandomForestClassifier
+from sklearn.pipeline import Pipeline, make_pipeline
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, LabelEncoder, OneHotEncoder
 from sklearn.metrics import mean_squared_error, r2_score, accuracy_score, roc_auc_score, precision_recall_curve, auc, f1_score, cohen_kappa_score
@@ -51,102 +52,6 @@ PLAYER_REMOVAL_COLUMNS = ["出身高校名", "出身大学名", "生年月日", 
 NUM_CLASS = 8
 
 
-def accuracy(preds, data):
-    """精度 (Accuracy) を計算する関数"""
-    y_true = data.get_label()
-    y_preds = np.reshape(preds, [len(y_true), 8], order='F')
-    y_pred = np.argmax(y_preds, axis=1)
-    metric = np.mean(y_true == y_pred)
-    return 'accuracy', metric, True
-
-def get_best_params(train_x: t.Any, train_y: t.Any, num_class: int) -> t.Any:
-    tr_x, val_x, tr_y, val_y = train_test_split(train_x, train_y, test_size=0.2, random_state=1)
-    lgb_train = lgb.Dataset(tr_x, tr_y)
-    lgb_eval = lgb.Dataset(val_x, val_y)
-    params = {
-        'objective': 'multiclass',
-        'metric': 'multi_logloss',
-        'boosting_type': 'gbdt', 
-        'num_class': num_class,
-    }
-    best_params = {}
-    tuning_history = []
-    gbm = lightgbm_tuner.train(
-        params,
-        lgb_train,
-        valid_sets=lgb_eval,
-        num_boost_round=10000,
-        early_stopping_rounds=20,
-        verbose_eval=50,
-        best_params=best_params,
-        tuning_history=tuning_history
-    )
-    return best_params
-
-def get_model(tr_dataset: t.Any, val_dataset: t.Any, params: t.Dict[str, t.Any]) -> t.Any:
-    params = {
-        'objective': 'multiclass',
-        'metric': 'multi_logloss',
-        'boosting_type': 'gbdt', 
-        'num_class': NUM_CLASS,
-        **params
-    }
-    evals_result = {}
-    model = lgb.train(
-        params=params,
-        train_set=tr_dataset,
-        valid_sets=[val_dataset, tr_dataset],
-        early_stopping_rounds=20,
-        num_boost_round=10000,
-        valid_names=['eval','train'],
-        evals_result=evals_result,
-        verbose_eval=50,
-        feval=accuracy,
-    )
-    return model, evals_result
-
-def objective(X, y, trial):
-    """最適化する目的関数"""
-    print("Run objective")
-    tr_x, val_x, tr_y, val_y = train_test_split(X, y, random_state=1)
-    gbm = lgb.LGBMClassifier(
-        objective="multiclass",
-        boosting_type= 'gbdt', 
-        #n_jobs = 4,
-        n_estimators=10000,
-    )
-    # RFE で取り出す特徴量の数を最適化する
-    n_features_to_select = trial.suggest_int('n_features_to_select', 1, len(list(tr_x.columns))),
-    rfe = RFE(estimator=gbm, n_features_to_select=n_features_to_select, verbose=50, step=3)
-    rfe.fit(tr_x, tr_y)
-    selected_cols = list(tr_x.columns[rfe.support_])
-    
-    tr_x_selected = tr_x.loc[:, selected_cols]
-    val_x_selected = val_x.loc[:, selected_cols]
-    gbm.fit(
-        tr_x_selected, 
-        tr_y,
-        eval_set=[(val_x_selected, val_y)],
-        early_stopping_rounds=20
-    )
-    y_pred = gbm.predict(val_x_selected)
-    kappa = cohen_kappa_score(val_y, y_pred)
-    return kappa
-
-def get_important_features(train_x: t.Any, train_y: t.Any, best_feature_count: int):
-    gbm = lgb.LGBMClassifier(
-        objective="multiclass",
-        boosting_type= 'gbdt', 
-        #n_jobs = 4,
-    )
-    print("Start RFE")
-    selector = RFE(gbm, n_features_to_select=best_feature_count, verbose=50)
-    selector.fit(train_x, train_y) # 学習データを渡す
-    print("Finished RFE")
-    selected_train_x = pd.DataFrame(selector.transform(train_x), columns=train_x.columns[selector.support_])
-    return selected_train_x, train_y
-
-
 def main():
     """
     << 処理の流れ >>
@@ -176,59 +81,106 @@ def main():
         right_on=['年度','選手ID'],
     ).drop(['選手ID', '投球位置区域'], axis=1).fillna(0)
 
-    labal = merged_data.loc[:, "球種"]
+    label = merged_data.loc[:, "球種"]
     use = merged_data.loc[:, "use"]
     merged_data = merged_data.drop(["use", "位置", "年度", "球種"], axis=1)
 
     # category_encodersによってカテゴリ変数をencordingする
     categorical_columns = [c for c in merged_data.columns if merged_data[c].dtype == 'object']
-    ce_oe = ce.OrdinalEncoder(cols=categorical_columns, handle_unknown='impute')
-    encorded_data = ce_oe.fit_transform(merged_data) 
+    ce_ohe = ce.OneHotEncoder(cols=categorical_columns, handle_unknown='impute')
+    encorded_data = ce_ohe.fit_transform(merged_data) 
+    encorded_data = pd.concat([encorded_data, use, label], axis=1)
     
-
-    f = partial(objective, encorded_data, labal) # 目的関数に引数を固定しておく
-    study = optuna.create_study(direction='maximize') # Optuna で取り出す特徴量の数を最適化する
-    study.optimize(f, n_trials=10) # 試行回数を決定する
-    print('params:', study.best_params)# 発見したパラメータを出力する
-    best_feature_count = study.best_params['n_features_to_select']
-    selected_data, selected_label = get_important_features(encorded_data, labal, best_feature_count)
-    selected_data = pd.concat([selected_data, use, selected_label], axis=1)
-
-    train = selected_data[selected_data["use"] == "train"].drop("use", axis=1).reset_index(drop=True)
-    test = selected_data[selected_data["use"] == "test"].drop("use", axis=1).reset_index(drop=True)
-
+    train = encorded_data[encorded_data["use"] == "train"].drop("use", axis=1).reset_index(drop=True)
+    test = encorded_data[encorded_data["use"] == "test"].drop("use", axis=1).reset_index(drop=True)
     train_x = train.drop("球種", axis=1)
     train_y = train.loc[:,"球種"]
     test_x = test.drop("球種", axis=1)
 
-    best_params = get_best_params(train_x, train_y, NUM_CLASS)
-    print(best_params)
- 
-    n_splits = 10
-    submission = np.zeros((len(test_x), NUM_CLASS))
-    kappas = {}
-    skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=1)
+    est = RandomForestClassifier(random_state=0)
+    skf = StratifiedKFold(n_splits=3, shuffle=True, random_state=1)
+    selector = RFECV(estimator=est, step=0.05, n_jobs=-1, min_features_to_select=1, cv=skf, verbose=10)
+    selector.fit(train_x, train_y)
+    selected_columns = train_x.columns[selector.support_]
+    selected_train_x = pd.DataFrame(selector.transform(train_x), columns=selected_columns)
+    selected_test_x = test_x.loc[:, selected_columns]
+
+    tr_x, val_x, tr_y, val_y = train_test_split(selected_train_x, train_y, test_size=0.2, stratify=train_y)
 
     estimators = [
         (
-            'lgb', 
-            lgb.LGBMClassifier(**best_params, verbose=10)
-        ),
-        (
-            'lr', 
-            LogisticRegression(
-                penalty='l2',
-                max_iter=1000,
+            "Gradient Boosting", 
+            GradientBoostingClassifier(
+                n_estimators=1000,
+                max_depth=10,
+                random_state=1
             )
         ),
+        (
+            "Random Forest", 
+            RandomForestClassifier(
+                n_estimators=1000,
+                random_state=1,
+                n_jobs=-1
+            )
+        ),
+        (
+            "LightGBM", 
+            lgb.LGBMClassifier(
+                n_estimators=1000,
+                objective='multiclass',
+                n_jobs=-1
+            )
+        ),
+        (
+            "Logistic Regression",
+            make_pipeline(
+                StandardScaler(),
+                LogisticRegression(
+                    penalty='l2',
+                    max_iter=1000,
+                    n_jobs=-1,
+                )
+            )
+        )
     ]
-    fin_est = LogisticRegression(penalty='l2',max_iter=10)
-    clf = StackingClassifier(estimators=estimators, final_estimator=fin_est, cv=skf, verbose=10)
-    clf.fit(train_x, train_y)
-    predictions = clf.predict_proba(test_x)
-    submission = pd.DataFrame(predictions)
-    print(submission)
-    submission.to_csv(f"{DATA_DIR}/my_submission20.csv", header=False)
+    
+    skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=1)
+    clf = StackingClassifier(
+        estimators=estimators, 
+        final_estimator=lgb.LGBMClassifier(
+            n_estimators=1000,
+            objective='multiclass',
+            n_jobs=-1
+        ), 
+        n_jobs=-1, 
+        cv=skf,
+        verbose=10
+    )
+    clf.fit(
+        tr_x, 
+        tr_y
+        # eval_set=[(val_x, val_y)],
+        # eval_metric='multi_logloss',
+        # early_stopping_rounds=10
+    )
+    predictions = clf.predict_proba(selected_test_x)
+    print(predictions, predictions.shape)
+
+    #dataframe.to_csv('submission_sklearn_single_stacking_model.csv', index=False)
+
+
+    # for pipe_name, pipeline in pipelines.items():
+    #     print(f"########## START {pipe_name} Learning ##########")
+    #     skf = StratifiedKFold(n_splits=5, shuffle=True)
+    #     pipeline.fit(train_x, train_y) # learning
+    #     results = cross_val_score(pipeline, train_x, train_y, scoring='f1_micro', cv=skf) # scoring with CV
+    #     y_pred = pipeline.predict(test_x)
+    #     print(y_pred)
+    #     f1 = f1_score(y_pred, test_y, average="micro")
+    #     print("###########################################")
+    #     print(f'train auc: [{np.mean(results)}]')
+    #     print(f'final {pipe_name} f1: [{f1}]')
 
 
 if __name__ == "__main__":
