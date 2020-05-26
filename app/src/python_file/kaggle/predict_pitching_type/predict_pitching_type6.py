@@ -88,15 +88,14 @@ def main():
     # category_encodersによってカテゴリ変数をencordingする
     categorical_columns = [c for c in merged_data.columns if merged_data[c].dtype == 'object']
     ce_ohe = ce.OneHotEncoder(cols=categorical_columns, handle_unknown='impute')
-    encorded_data = ce_ohe.fit_transform(merged_data)
-    encorded_data = cf.standardize(encorded_data) # 標準化
-    
+    encorded_data = ce_ohe.fit_transform(merged_data) 
+
     for column_name, item in encorded_data.iteritems():
         if item.dtype == "int64":
             encorded_data[column_name] = item.astype('int32')
         else:
             encorded_data[column_name] = item.astype('float32')
-
+        
     encorded_data = pd.concat([encorded_data, use, label], axis=1)
     
     train = encorded_data[encorded_data["use"] == "train"].drop("use", axis=1).reset_index(drop=True)
@@ -105,85 +104,46 @@ def main():
     train_y = train.loc[:,"球種"]
     test_x = test.drop("球種", axis=1)
 
-    est = RandomForestClassifier(random_state=0)
-    skf = StratifiedKFold(n_splits=3, shuffle=True, random_state=1)
-    selector = RFECV(estimator=est, step=0.05, n_jobs=1, min_features_to_select=100, cv=skf, verbose=10)
-    selector.fit(train_x, train_y)
-    selected_columns = train_x.columns[selector.support_]
-    selected_train_x = pd.DataFrame(selector.transform(train_x), columns=selected_columns)
+
+    gbm = lgb.LGBMClassifier(
+        objective="multiclass",
+        boosting_type= 'gbdt', 
+        #n_jobs = 4,
+        n_estimators=200,
+    )
+    # RFE で取り出す特徴量の数を最適化する
+    rfe = RFE(estimator=gbm, n_features_to_select=100, step=0.05, verbose=10)
+    rfe.fit(train_x, train_y)
+    selected_columns = list(train_x.columns[rfe.support_])
+
+    selected_train_x = train_x.loc[:, selected_columns]
     selected_test_x = test_x.loc[:, selected_columns]
 
     tr_x, val_x, tr_y, val_y = train_test_split(selected_train_x, train_y, test_size=0.2, stratify=train_y)
+    skf = StratifiedKFold(n_splits=3, shuffle=True, random_state=1)
 
-    estimetor_num = 200
-    estimators = [
-        (
-            "Gradient Boosting", 
-            GradientBoostingClassifier(
-                n_estimators=estimetor_num,
-                max_depth=10,
-                random_state=1
-            )
-        ),
-        (
-            "Random Forest", 
-            RandomForestClassifier(
-                n_estimators=estimetor_num,
-                random_state=1,
-                n_jobs=1
-            )
-        ),
-        (
-            "LightGBM", 
-            lgb.LGBMClassifier(
-                n_estimators=estimetor_num,
-                objective='multiclass',
-                n_jobs=1
-            )
-        ),
-        (
-            "Logistic Regression",
-            make_pipeline(
-                StandardScaler(),
-                LogisticRegression(
-                    penalty='l2',
-                    max_iter=estimetor_num,
-                    n_jobs=1,
-                )
-            )
-        )
-    ]
-    
-    skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=1)
-    clf = StackingClassifier(
-        estimators=estimators, 
-        final_estimator=lgb.LGBMClassifier(
-            n_estimators=estimetor_num,
-            objective='multiclass',
-            n_jobs=1
-        ), 
-        n_jobs=1, 
-        cv=skf,
-        verbose=10
+    tr_dataset = lgb.Dataset(tr_x, tr_y)
+    val_dataset = lgb.Dataset(val_x, val_y, reference=tr_dataset)
+
+    lgb_params = {
+        'objective': 'multiclass',
+        'num_class': 8,
+        'boosting_type': 'gbdt', 
+        'metric': 'multi_logloss'
+    }
+
+    model = lgb.train(
+        lgb_params,
+        tr_dataset,
+        valid_sets=val_dataset,
+        num_boost_round=1000,
+        early_stopping_rounds=10
     )
-    clf.fit(tr_x, tr_y)
-    predictions = clf.predict_proba(selected_test_x)
-    print(predictions, predictions.shape)
-    submission = pd.DataFrame(predictions)
+    y_pred = model.predict(selected_test_x)
+    print(y_pred, y_pred.shape)
+    submission = pd.DataFrame(y_pred)
     print(submission)
     submission.to_csv(f"{DATA_DIR}/my_submission20.csv", header=False)
-
-    # for pipe_name, pipeline in pipelines.items():
-    #     print(f"########## START {pipe_name} Learning ##########")
-    #     skf = StratifiedKFold(n_splits=5, shuffle=True)
-    #     pipeline.fit(train_x, train_y) # learning
-    #     results = cross_val_score(pipeline, train_x, train_y, scoring='f1_micro', cv=skf) # scoring with CV
-    #     y_pred = pipeline.predict(test_x)
-    #     print(y_pred)
-    #     f1 = f1_score(y_pred, test_y, average="micro")
-    #     print("###########################################")
-    #     print(f'train auc: [{np.mean(results)}]')
-    #     print(f'final {pipe_name} f1: [{f1}]')
 
 
 if __name__ == "__main__":
