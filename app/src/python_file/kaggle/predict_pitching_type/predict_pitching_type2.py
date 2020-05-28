@@ -8,8 +8,10 @@ import typing as t
 import seaborn as sns
 import matplotlib as mpl
 import matplotlib.pyplot as plt
+import category_encoders as ce
 import optuna #ハイパーパラメータチューニング自動化ライブラリ
 from optuna.integration import lightgbm_tuner #LightGBM用Stepwise Tuningに必要
+from sklearn.feature_selection import RFE, RFECV
 from datetime import datetime
 from more_itertools import windowed
 from python_file.kaggle.common import common_funcs as cf
@@ -53,12 +55,9 @@ PRE_TRAIN_PARAMS = {
     'feature_fraction' : 0.7,
     'max_depth' : 10
 }
+
 NUM_CLASS = 8
 
-
-def remove_columns(df):
-    df = df.drop(REMOVAL_COLUMNS, axis=1).fillna(0)
-    return df
 
 def get_important_cols(pre_train_x, pre_train_y, pre_valid_x, pre_valid_y, pre_train_params=PRE_TRAIN_PARAMS):    
     pre_train_dataset = lgb.Dataset(pre_train_x, pre_train_y)
@@ -82,24 +81,10 @@ def get_important_cols(pre_train_x, pre_train_y, pre_valid_x, pre_valid_y, pre_t
     return important_cols
 
 
+def get_selected_data(train_x, train_y):
+    est = lgb.LGBMClassifier()
+    selector = RFECV(estimator=est, step=0.05, n_jobs=1, min_features_to_select=100, cv=skf, verbose=10)
 
-def get_best_col_names(train_x: t.Any, train_y: t.Any, best_params: t.Any) -> t.Any:
-    tr_x, val_x, tr_y, val_y = train_test_split(train_x, train_y, test_size=0.2, random_state=0)
-    tr_dataset = lgb.Dataset(tr_x, tr_y)
-    val_dataset = lgb.Dataset(val_x, val_y, reference=tr_dataset)
-    model = lgb.train(
-        params=best_params,
-        train_set=tr_dataset,
-        valid_sets=val_dataset,
-        early_stopping_rounds=5,
-    )
-    pre_importance_df = pd.DataFrame({
-        'feature': tr_x.columns,
-        'importance': model.feature_importance()
-    }).sort_values('importance', ascending=False)
-    important_feature = pre_importance_df.iloc[0:40]
-    important_cols = list(important_feature["feature"])
-    return important_cols
 
 
 def get_best_params(df, num_class) -> t.Any:
@@ -136,60 +121,6 @@ def get_best_params(df, num_class) -> t.Any:
     return best_params
 
 
-# def get_best_params(df, num_class) -> t.Any:
-#     _train = df[df["月"] < 9]
-#     _valid = df[df["月"] >= 9]
-#     tr_x = _train.drop(["球種", "年度"], axis=1)
-#     val_x = _valid.drop(["球種", "年度"], axis=1)
-#     tr_y = _train.loc[:, "球種"]
-#     val_y = _valid.loc[:, "球種"]
-#     best_params = {}
-#     gbm = lgb.LGBMClassifier(
-#         objective="multiclass",
-#         boosting_type= 'gbdt', 
-#         n_jobs = 4,
-#     )
-#     grid_params = {
-#         'learning_rate': [0.1, 0.2],
-#         'n_estimators': [100, 200],
-#         'min_data_in_leaf': [1000, 2000],
-#         'num_leaves': [10, 20],
-#         'num_iterations' : [100, 200],
-#         'feature_fraction' : [0.7],
-#         'max_depth' : [10]
-#     }
-#     # grid_params = {
-#     #     'learning_rate': [0.1],
-#     #     'n_estimators': [50],
-#     #     'min_data_in_leaf': [2000],
-#     #     'num_leaves': [10],
-#     #     'num_iterations' : [10],
-#     #     'feature_fraction' : [0.7],
-#     #     'max_depth' : [10]
-#     # }
-#     grid_search = GridSearchCV(
-#         gbm, # 分類器,
-#         param_grid=grid_params, # 試したいパラメータの渡し方
-#     )
-#     grid_search.fit(
-#         tr_x,
-#         tr_y,
-#         eval_set=[(val_x, val_y)],
-#         early_stopping_rounds=5
-#     )
-#     best_params['learning_rate'] = grid_search.best_params_['learning_rate']
-#     best_params['min_data_in_leaf'] = grid_search.best_params_['min_data_in_leaf']
-#     best_params['n_estimators'] = grid_search.best_params_['n_estimators']
-#     best_params['num_leaves'] = grid_search.best_params_['num_leaves']
-#     best_params['num_iterations'] = grid_search.best_params_['num_iterations']
-#     best_params['feature_fraction'] = grid_search.best_params_['feature_fraction']
-#     best_params['max_depth'] = grid_search.best_params_['max_depth']
-#     best_params["objective"] = 'multiclass'
-#     best_params["boosting_type"] = 'gbdt'
-#     best_params["metric"] = 'multi_logloss'
-#     best_params['num_class'] = num_class
-#     return best_params
-
 def get_model(tr_dataset: t.Any, val_dataset: t.Any, params: t.Dict[str, t.Any]) -> t.Any:
     model = lgb.train(
         params=params,
@@ -200,13 +131,6 @@ def get_model(tr_dataset: t.Any, val_dataset: t.Any, params: t.Dict[str, t.Any])
     )
     return model
 
-def gen_r2_score_fig(score_list, n_splits, save_dir):
-    plt.figure()
-    plt.plot(range(1, n_splits+1), marker='o')
-    plt.xlabel("epochs")
-    plt.ylabel("r2_score")
-    plt.xlim(0, n_splits+1)
-    plt.savefig(f"{save_dir}/r2_score.png")
 
 def main():
     train_pitch = pd.read_csv(TRAIN_PITCH_PATH)
@@ -231,75 +155,108 @@ def main():
         left_on=['年度','投手ID'], 
         right_on=['年度','選手ID'],
     ).drop(['選手ID', '投球位置区域'], axis=1).fillna(0)
+    label = merged_data.loc[:, "球種"]
+    merged_data = merged_data.drop("球種", axis=1)
+    print(merged_data["日付"].value_counts())
 
-    pre_train_data = merged_data[merged_data["年度"] == 2017] # 2017年度データは学習用
-    pre_train_data = cf.label_encorder(pre_train_data)
-    pre_train = pre_train_data[pre_train_data["月"] < 9] # 2017/9以前のデータ(3,4,5,6,7,8)
-    pre_valid =  pre_train_data[pre_train_data["月"] >= 9] # 2017/9以降のデータ(9,10)
-    years = merged_data.loc[:, "年度"]
-
-    pre_train_x = pre_train.drop(["球種","月","年度", "日付"], axis=1)
-    pre_train_y = pre_train.loc[:, "球種"]
-    pre_valid_x = pre_valid.drop(["球種","月","年度", "日付"], axis=1)
-    pre_valid_y = pre_valid.loc[:, "球種"]
-
-    important_cols = get_important_cols(pre_train_x, pre_train_y, pre_valid_x, pre_valid_y)
-    dataset = merged_data.loc[:, [*important_cols, "球種", "月"]]
-    dataset = cf.label_encorder(dataset)
-    dataset = pd.concat([dataset, years], axis=1)
-    cf.check_corr(dataset, "predict_pitching_type")
-
-    train = dataset[dataset["年度"] == 2017]
-    test = dataset[dataset["年度"] != 2017]
-
-    train_x = train.drop(["球種", "年度"], axis=1)
-    train_y = train.loc[:, "球種"]
-    test_x = test.drop(["球種", "年度"], axis=1).reset_index(drop=True)
-    n_splits = 5
-
-    best_params = get_best_params(train, NUM_CLASS) # 最適ハイパーパラメータの探索   
-    # best_params = {
-    #     "objective": 'multiclass',
-    #     "boosting_type": 'gbdt',
-    #     "metric": 'multi_logloss',
-    #     'num_class':  NUM_CLASS,
-    #     'learning_rate': 0.1,
-    #     'n_estimators': 100,
-    #     'min_data_in_leaf': 2000,
-    #     'num_leaves': 10,
-    #     'num_iterations' : 100,
-    #     'feature_fraction' : 0.7,
-    #     'max_depth' : 10
-    # }
-
-    submission = np.zeros((len(test_x),NUM_CLASS))
-    kf = list(windowed(range(3,11), 4, step=1))
-    for months in kf:
-        _train = train[
-            (train["月"] == months[0]) |
-            (train["月"] == months[1]) |
-            (train["月"] == months[2])
-        ]
-        _train_x = _train.drop(["球種", "年度"], axis=1).reset_index(drop=True)
-        _train_y = _train.loc[:, "球種"].reset_index(drop=True)
-
-        _valid = train[train["月"] == months[-1]]
-        _valid_x = _valid.drop(["球種", "年度"], axis=1).reset_index(drop=True)
-        _valid_y = _valid.loc[:, "球種"].reset_index(drop=True)
-        
-        tr_dataset = lgb.Dataset(_train_x, _train_y)
-        val_dataset = lgb.Dataset(_valid_x, _valid_y, reference=tr_dataset)
-        model = get_model(tr_dataset, val_dataset, best_params)
-        y_pred = model.predict(test_x, num_iteration=model.best_iteration)
-        submission += y_pred
-
-    submission_df = pd.DataFrame(submission/n_splits)
-    print("#################################")
-    print(submission_df)
-    print(best_params) 
-    print("#################################")
+    grouped = merged_data.groupby("日付")
+    print(grouped.shape)
     
-    submission_df.to_csv(f"{DATA_DIR}/my_submission11.csv", header=False)
+    train_x, valid_x, train_y, valid_y = train_test_split(grouped, label, test_size=0.2)
+    
+    print(train_x["日付"].value_counts())
+    print(valid_x["日付"].value_counts())
+
+
+    # categorical_columns = [c for c in merged_data.columns if merged_data[c].dtype == "object"]
+    # ce_oe = ce.OrdinalEncoder(cols=categorical_columns, handle_unknown='impute')
+    # ce_oe.fit(merged_data)
+    # encorded_data = ce_oe.fit_transform(merged_data)
+    # encorded_data = pd.concat([encorded_data, label], axis=1)
+    
+    # train = encorded_data[encorded_data["年度"] == 2017] # 2017年度データは学習用
+
+    
+    
+    
+    # train_x = encorded_data.drop("球種", axis=1)
+    # train_y = encorded_data.loc[:, "球種"]
+    # selected_train_x, train_y = get_selected_data(train_x, train_y)
+    
+
+    
+
+
+
+
+    # pre_train_data = merged_data[merged_data["年度"] == 2017] # 2017年度データは学習用
+    # pre_train_data = cf.label_encorder(pre_train_data)
+    # pre_train = pre_train_data[pre_train_data["月"] < 9] # 2017/9以前のデータ(3,4,5,6,7,8)
+    # pre_valid =  pre_train_data[pre_train_data["月"] >= 9] # 2017/9以降のデータ(9,10)
+    # years = merged_data.loc[:, "年度"]
+
+    # pre_train_x = pre_train.drop(["球種","月","年度", "日付"], axis=1)
+    # pre_train_y = pre_train.loc[:, "球種"]
+    # pre_valid_x = pre_valid.drop(["球種","月","年度", "日付"], axis=1)
+    # pre_valid_y = pre_valid.loc[:, "球種"]
+
+    # important_cols = get_important_cols(pre_train_x, pre_train_y, pre_valid_x, pre_valid_y)
+    # dataset = merged_data.loc[:, [*important_cols, "球種", "月"]]
+    # dataset = cf.label_encorder(dataset)
+    # dataset = pd.concat([dataset, years], axis=1)
+    # cf.check_corr(dataset, "predict_pitching_type")
+
+    # train = dataset[dataset["年度"] == 2017]
+    # test = dataset[dataset["年度"] != 2017]
+
+    # train_x = train.drop(["球種", "年度"], axis=1)
+    # train_y = train.loc[:, "球種"]
+    # test_x = test.drop(["球種", "年度"], axis=1).reset_index(drop=True)
+    # n_splits = 5
+
+    # best_params = get_best_params(train, NUM_CLASS) # 最適ハイパーパラメータの探索   
+    # # best_params = {
+    # #     "objective": 'multiclass',
+    # #     "boosting_type": 'gbdt',
+    # #     "metric": 'multi_logloss',
+    # #     'num_class':  NUM_CLASS,
+    # #     'learning_rate': 0.1,
+    # #     'n_estimators': 100,
+    # #     'min_data_in_leaf': 2000,
+    # #     'num_leaves': 10,
+    # #     'num_iterations' : 100,
+    # #     'feature_fraction' : 0.7,
+    # #     'max_depth' : 10
+    # # }
+
+    # submission = np.zeros((len(test_x),NUM_CLASS))
+    # kf = list(windowed(range(3,11), 4, step=1))
+    # for months in kf:
+    #     _train = train[
+    #         (train["月"] == months[0]) |
+    #         (train["月"] == months[1]) |
+    #         (train["月"] == months[2])
+    #     ]
+    #     _train_x = _train.drop(["球種", "年度"], axis=1).reset_index(drop=True)
+    #     _train_y = _train.loc[:, "球種"].reset_index(drop=True)
+
+    #     _valid = train[train["月"] == months[-1]]
+    #     _valid_x = _valid.drop(["球種", "年度"], axis=1).reset_index(drop=True)
+    #     _valid_y = _valid.loc[:, "球種"].reset_index(drop=True)
+        
+    #     tr_dataset = lgb.Dataset(_train_x, _train_y)
+    #     val_dataset = lgb.Dataset(_valid_x, _valid_y, reference=tr_dataset)
+    #     model = get_model(tr_dataset, val_dataset, best_params)
+    #     y_pred = model.predict(test_x, num_iteration=model.best_iteration)
+    #     submission += y_pred
+
+    # submission_df = pd.DataFrame(submission/n_splits)
+    # print("#################################")
+    # print(submission_df)
+    # print(best_params) 
+    # print("#################################")
+    
+    # submission_df.to_csv(f"{DATA_DIR}/my_submission21.csv", header=False)
 
 
 if __name__ == "__main__":

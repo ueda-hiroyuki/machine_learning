@@ -13,8 +13,8 @@ import category_encoders as ce # カテゴリ変数encording用ライブラリ
 import optuna #ハイパーパラメータチューニング自動化ライブラリ
 from optuna.integration import lightgbm_tuner #LightGBM用Stepwise Tuningに必要
 from sklearn.impute import SimpleImputer 
+from sklearn.decomposition import PCA
 from functools import partial
-from sklearn.manifold import TSNE
 from python_file.kaggle.common import common_funcs as cf
 from sklearn.feature_selection import RFE
 from sklearn.model_selection import train_test_split, KFold, StratifiedKFold, cross_val_predict
@@ -57,7 +57,6 @@ def accuracy(preds, data):
     return 'accuracy', metric, True
 
 def get_best_params(train_x: t.Any, train_y: t.Any, num_class: int) -> t.Any:
-    print("Start parameter tuning")
     tr_x, val_x, tr_y, val_y = train_test_split(train_x, train_y, test_size=0.2, random_state=1)
     lgb_train = lgb.Dataset(tr_x, tr_y)
     lgb_eval = lgb.Dataset(val_x, val_y)
@@ -76,11 +75,10 @@ def get_best_params(train_x: t.Any, train_y: t.Any, num_class: int) -> t.Any:
         valid_sets=lgb_eval,
         num_boost_round=10000,
         early_stopping_rounds=20,
-        verbose_eval=50,
+        verbose_eval=10,
         best_params=best_params,
         tuning_history=tuning_history
     )
-    print("Finished parameter tuning")
     return best_params
 
 def get_model(tr_dataset: t.Any, val_dataset: t.Any, params: t.Dict[str, t.Any]) -> t.Any:
@@ -91,7 +89,6 @@ def get_model(tr_dataset: t.Any, val_dataset: t.Any, params: t.Dict[str, t.Any])
         valid_sets=[val_dataset, tr_dataset],
         early_stopping_rounds=20,
         num_boost_round=10000,
-        verbose_eval=50,
         valid_names=['eval','train'],
         evals_result=evals_result,
         feval=accuracy,
@@ -100,44 +97,31 @@ def get_model(tr_dataset: t.Any, val_dataset: t.Any, params: t.Dict[str, t.Any])
 
 def objective(X, y, trial):
     """最適化する目的関数"""
-    print("Run objective")
-    tr_x, val_x, tr_y, val_y = train_test_split(X, y, random_state=1)
     gbm = lgb.LGBMClassifier(
         objective="multiclass",
         boosting_type= 'gbdt', 
-        #n_jobs = 4,
+        n_jobs = 4,
         n_estimators=10000,
     )
-    # RFE で取り出す特徴量の数を最適化する
-    n_features_to_select = trial.suggest_int('n_features_to_select', 1, len(list(tr_x.columns))),
-    rfe = RFE(estimator=gbm, n_features_to_select=n_features_to_select)
-    rfe.fit(tr_x, tr_y)
-    selected_cols = list(tr_x.columns[rfe.support_])
-    
-    tr_x_selected = tr_x.loc[:, selected_cols]
-    val_x_selected = val_x.loc[:, selected_cols]
+    n_components = trial.suggest_int('n_components', 1, len(list(X.columns))),
+    pca = PCA(n_components=n_components[0]).fit(X)
+    x_pca = pca.transform(X)
+    tr_x, val_x, tr_y, val_y = train_test_split(x_pca, y, random_state=1)
     gbm.fit(
-        tr_x_selected, 
+        tr_x, 
         tr_y,
-        eval_set=[(val_x_selected, val_y)],
-        early_stopping_rounds=20
+        eval_set=[(val_x, val_y)],
+        early_stopping_rounds=20,
+        verbose=50
     )
-    y_pred = gbm.predict(val_x_selected)
+    y_pred = gbm.predict(val_x)
     accuracy = accuracy_score(val_y, y_pred)
     return accuracy
 
 def get_important_features(train_x: t.Any, train_y: t.Any, best_feature_count: int):
-    gbm = lgb.LGBMClassifier(
-        objective="multiclass",
-        boosting_type= 'gbdt', 
-        #n_jobs = 4,
-    )
-    print("Start RFE")
-    selector = RFE(gbm, n_features_to_select=best_feature_count, step=5, verbose=50)
-    selector.fit(train_x, train_y) # 学習データを渡す
-    print("Finished RFE")
-    selected_train_x = pd.DataFrame(selector.transform(train_x), columns=train_x.columns[selector.support_])
-    return selected_train_x, train_y
+    pca = PCA(n_components=best_feature_count).fit(train_x)
+    x_pca = pca.transform(train_x)
+    return x_pca, train_y
 
 
 def main():
@@ -169,40 +153,39 @@ def main():
         right_on=['年度','選手ID'],
     ).drop(['選手ID', '投球位置区域'], axis=1).fillna(0)
 
-    labal = merged_data.loc[:, "球種"]
     use = merged_data.loc[:, "use"]
-    merged_data = merged_data.drop(["use", "位置", "年度", "球種"], axis=1)
+    merged_data = merged_data.drop(["use", "位置", "年度"], axis=1)
 
     # category_encodersによってカテゴリ変数をencordingする
     categorical_columns = [c for c in merged_data.columns if merged_data[c].dtype == 'object']
     ce_oe = ce.OrdinalEncoder(cols=categorical_columns, handle_unknown='impute')
     encorded_data = ce_oe.fit_transform(merged_data) 
-
-    selected_data, selected_label = get_important_features(encorded_data, labal, 10)  
-    dataset = pd.concat([selected_data, use, selected_label], axis=1)
+    encorded_data = pd.concat([encorded_data, use], axis=1)
  
-    train = dataset[dataset["use"] == "train"].drop("use", axis=1).reset_index(drop=True)
-    test = dataset[dataset["use"] == "test"].drop("use", axis=1).reset_index(drop=True)
-    
+    train = encorded_data[encorded_data["use"] == "train"].drop("use", axis=1).reset_index(drop=True)
+    test = encorded_data[encorded_data["use"] == "test"].drop("use", axis=1).reset_index(drop=True)
+
     train_x = train.drop("球種", axis=1)
     train_y = train.loc[:,"球種"]
     test_x = test.drop("球種", axis=1)
 
-    # f = partial(objective, train_x, train_y) # 目的関数に引数を固定しておく
-    # study = optuna.create_study(direction='maximize') # Optuna で取り出す特徴量の数を最適化する
-    # study.optimize(f, n_trials=20) # 試行回数を決定する
-    # print('params:', study.best_params)# 発見したパラメータを出力する
-    # best_feature_count = study.best_params['n_features_to_select']
+    f = partial(objective, train_x, train_y) # 目的関数に引数を固定しておく
+    study = optuna.create_study(direction='maximize') # Optuna で取り出す特徴量の数を最適化する
+
+    study.optimize(f, n_trials=10) # 試行回数を決定する
+    print('params:', study.best_params)# 発見したパラメータを出力する
+    best_feature_count = study.best_params['n_components']
+    x_pca, train_y = get_important_features(train_x, train_y, best_feature_count)  
 
     n_splits = 10
     num_class = 8
-    best_params = get_best_params(train_x, train_y, num_class) # 最適ハイパーパラメータの探
+    best_params = get_best_params(x_pca, train_y, num_class) # 最適ハイパーパラメータの探索
 
     submission = np.zeros((len(test_x),num_class))
-    acc_scores = {}
+    accs = {}
 
     kf = KFold(n_splits=n_splits, shuffle=True, random_state=0)
-    for i, (tr_idx, val_idx) in enumerate(kf.split(train_x, train_y)):
+    for i, (tr_idx, val_idx) in enumerate(kf.split(x_pca, train_y)):
         tr_x = train_x.iloc[tr_idx].reset_index(drop=True)
         tr_y = train_y.iloc[tr_idx].reset_index(drop=True)
         val_x = train_x.iloc[val_idx].reset_index(drop=True)
@@ -232,9 +215,9 @@ def main():
 
         y_pred = np.argmax(model.predict(val_x), axis=1) # 0~8の確率
         acc = accuracy_score(val_y, y_pred)
-        acc_scores[i] = acc
+        accs[i] = acc
         print("#################################")
-        print(f"acc_scores: {acc}")
+        print(f"accuracy: {acc}")
         print("#################################")
         y_preda = model.predict(test_x, num_iteration=model.best_iteration) # 0~8の確率
         submission += y_preda
@@ -243,11 +226,11 @@ def main():
     print("#################################")
     print(submission_df)
     print(best_params) 
-    print(acc_scores)
-    # print(study.best_params)
+    print(accs)
+    print(study.best_params)
     print("#################################")
     
-    submission_df.to_csv(f"{DATA_DIR}/my_submission16.csv", header=False)
+    submission_df.to_csv(f"{DATA_DIR}/my_submission17.csv", header=False)
 
 
 if __name__ == "__main__":
