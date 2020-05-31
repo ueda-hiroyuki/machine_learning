@@ -14,13 +14,20 @@ import optuna #ハイパーパラメータチューニング自動化ライブ�
 from optuna.integration import lightgbm_tuner #LightGBM用Stepwise Tuningに必要
 from sklearn.impute import SimpleImputer 
 from functools import partial
+from sklearn.pipeline import Pipeline
 from sklearn.decomposition import PCA
 from python_file.kaggle.common import common_funcs as cf
 from sklearn.feature_selection import RFE
-from sklearn.model_selection import train_test_split, KFold, StratifiedKFold, cross_val_predict
+from sklearn.model_selection import train_test_split, KFold, StratifiedKFold, cross_val_predict, GridSearchCV
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, LabelEncoder, OneHotEncoder
 from sklearn.metrics import mean_squared_error, r2_score, accuracy_score, roc_auc_score, precision_recall_curve, auc, f1_score
-
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, AdaBoostClassifier
+from sklearn.svm import SVC, LinearSVC
+from sklearn.naive_bayes import GaussianNB
+from sklearn.neural_network import MLPClassifier
 
 """
 train_pitch(51 columns)
@@ -47,14 +54,132 @@ PLAYER_REMOVAL_COLUMNS = ["出身高校名", "出身大学名", "生年月日", 
 
 NUM_CLASS = 8
 
+PIPELINES = {
+    'knn_1': Pipeline([
+        ('scl',StandardScaler()),
+        ('est',KNeighborsClassifier(n_jobs=-1))
+    ]),
+    'logistic_1': Pipeline([
+        ('scl',StandardScaler()),
+        ('est',LogisticRegression(n_jobs=-1, random_state=1))
+    ]),
+    'tree_1': Pipeline([
+        ('est',DecisionTreeClassifier(random_state=1))
+    ]),
+    'tree_2': Pipeline([
+        ('est',DecisionTreeClassifier(max_depth=5, random_state=1))
+    ]),
+    'tree_3': Pipeline([
+        ('est',DecisionTreeClassifier(max_depth=10, random_state=1))
+    ]),
+    'rf_1': Pipeline([
+        ('est',RandomForestClassifier(random_state=1, n_jobs=1))
+    ]),
+    'rf_2': Pipeline([
+        ('est',RandomForestClassifier(n_jobs=1, max_depth=10, min_samples_leaf=10, min_samples_split=10, n_estimators=500, random_state=1))
+    ]),
+    'rf_3': Pipeline([
+        ('est',RandomForestClassifier(n_jobs=1, class_weight='balanced', max_depth=10, min_samples_leaf=20, min_samples_split=20, n_estimators=1000, random_state=1))
+    ]),
+    'gb_1': Pipeline([
+        ('est',GradientBoostingClassifier(random_state=1))
+    ]),
+    'gb_2': Pipeline([
+        ('est',GradientBoostingClassifier(max_depth=8, random_state=1))
+    ]),
+    'gb_3': Pipeline([
+        ('est',GradientBoostingClassifier(learning_rate=0.2, random_state=1))
+    ]),
+    'SVC_1': Pipeline([
+        ('scl',StandardScaler()),
+        ('est',SVC(kernel="poly", class_weight='balanced', random_state=1, C=1, probability=True))
+    ]),
+    'SVC_2': Pipeline([
+        ('scl',StandardScaler()),
+        ('est',SVC(kernel="rbf", class_weight='balanced', random_state=1, C=1, probability=True))
+    ]),
+    'SVC_3': Pipeline([
+        ('scl',StandardScaler()),
+        ('est',SVC(kernel="sigmoid", class_weight='balanced', random_state=1, C=1, probability=True))
+    ]),
+    'SVC_4': Pipeline([
+        ('scl',StandardScaler()),
+        ('est',SVC(kernel="linear", C=0.2, class_weight='balanced', random_state=1, probability=True))
+    ]),
+    'mlp_1': Pipeline([
+        ('scl',StandardScaler()),
+        ('est',MLPClassifier(hidden_layer_sizes=(3,3),max_iter=500,random_state=1))
+    ]),
+    'mlp_2': Pipeline([
+        ('scl',StandardScaler()),
+        ('est',MLPClassifier(hidden_layer_sizes=(3,3,3),max_iter=500,random_state=1))
+    ]),
+    'adb_1': Pipeline([
+        ('est',AdaBoostClassifier(random_state=1))
+    ]),
+    'adb_2': Pipeline([('est',AdaBoostClassifier(n_estimators=500, random_state=1))]),
+    'adb_3': Pipeline([
+        ('est',AdaBoostClassifier(learning_rate=0.1, random_state=1))
+    ])
+}
 
-def accuracy(preds, data):
-    """精度 (Accuracy) を計算する関数"""
-    y_true = data.get_label()
-    y_preds = np.reshape(preds, [len(y_true), 8], order='F')
-    y_pred = np.argmax(y_preds, axis=1)
-    metric = np.mean(y_true == y_pred)
-    return 'accuracy', metric, True
+GRID_SEARCH_PARAMS = {
+    'knn':{
+        'est__n_neighbors':[2,3,4],
+        'est__weights':['uniform','distance'],
+        'est__algorithm':['auto'],
+        'est__leaf_size':[10,100],
+        'est__p':[1,2]
+    },
+    'logistic': {
+        "est__C":[0.1, 0.2, 0.5,  1],
+        "est__penalty":['l1', 'l2'],
+        'est__class_weight':['balanced'],
+        'est__max_iter':[1000, 2000]
+    },
+    'tree':{
+        'est__max_leaf_nodes': [10],
+        'est__min_samples_split': [5, 10],
+        'est__max_depth': [5, 10],
+        'est__criterion': ['gini', 'entropy'],
+        'est__class_weight':['balanced', None]
+    },
+    'rf':{
+        'est__min_samples_split':[5, 10],
+        'est__min_samples_leaf':[5, 10],
+        'est__max_depth': [5, 8],
+        "est__criterion": ["entropy"],
+        'est__class_weight':['balanced', None]
+    },
+    'gb':{
+        'est__loss':['deviance','exponential'],
+        'est__learning_rate':[ 0.01, 0.1],
+        'est__max_depth':[5, 10],
+        'est__min_samples_split':[0.1, 0.5],
+        'est__min_samples_leaf':[3, 5],
+    }
+}
+
+PIPELINES_GS = {
+    'knn': Pipeline([
+        ('scl',StandardScaler()),
+        ('est',KNeighborsClassifier(n_jobs=1))
+    ]),
+    'logistic': Pipeline([
+        ('scl',StandardScaler()),
+        ('est',LogisticRegression(n_jobs=1, random_state=1))
+    ]),
+    'tree': Pipeline([
+        ('est',DecisionTreeClassifier(random_state=1))
+    ]),
+    'rf': Pipeline([
+        ('est',RandomForestClassifier(random_state=1, n_jobs=1))
+    ]),
+    'gb': Pipeline([
+        ('est',GradientBoostingClassifier(random_state=1))
+    ]),
+}
+
 
 def get_best_params(train_x: t.Any, train_y: t.Any, num_class: int) -> t.Any:
     tr_x, val_x, tr_y, val_y = train_test_split(train_x, train_y, test_size=0.2, random_state=1)
@@ -82,18 +207,14 @@ def get_best_params(train_x: t.Any, train_y: t.Any, num_class: int) -> t.Any:
     return best_params
 
 def get_model(tr_dataset: t.Any, val_dataset: t.Any, params: t.Dict[str, t.Any]) -> t.Any:
-    evals_result = {}
     model = lgb.train(
         params=params,
         train_set=tr_dataset,
         valid_sets=[val_dataset, tr_dataset],
         early_stopping_rounds=20,
         num_boost_round=10000,
-        valid_names=['eval','train'],
-        evals_result=evals_result,
-        feval=accuracy,
     )
-    return model, evals_result
+    return model_selection
 
 def objective(X, y, trial):
     """最適化する目的関数"""
@@ -117,6 +238,14 @@ def objective(X, y, trial):
     y_pred = gbm.predict(val_x)
     accuracy = accuracy_score(val_y, y_pred)
     return accuracy
+
+def get_selected_columns(train_x, train_y):
+    skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=1)
+    est = lgb.LGBMClassifier()
+    selector = RFECV(estimator=est, step=0.05, n_jobs=1, min_features_to_select=round(len(train_x)*0.5), cv=skf, verbose=10)
+    selector.fit(train_x, train_y)
+    selected_columns = train_x.columns[selector.support_]
+    return selected_columns
 
 
 def get_important_features(train_x: t.Any, train_y: t.Any, best_feature_count: int):
@@ -159,13 +288,9 @@ def main():
     labal = merged_data.loc[:, "球種"]
     merged_data = merged_data.drop(["use", "位置", "年度", "球種"], axis=1)
 
-
-    # category_encodersによってカテゴリ変数をencordingする
     categorical_columns = [c for c in merged_data.columns if merged_data[c].dtype == 'object']
-    # ce_oe = ce.OrdinalEncoder(cols=categorical_columns, handle_unknown='impute') # label_encording
     ce_ohe = ce.OneHotEncoder(cols=categorical_columns, handle_unknown='impute') # one_hot_encording
     encorded_data = ce_ohe.fit_transform(merged_data) 
-    encorded_data = cf.standardize(encorded_data) # 標準化
     encorded_data = pd.concat([encorded_data, use, labal], axis=1)
  
     train = encorded_data[encorded_data["use"] == "train"].drop("use", axis=1).reset_index(drop=True)
@@ -175,70 +300,39 @@ def main():
     train_y = train.loc[:,"球種"]
     test_x = test.drop("球種", axis=1)
 
-    f = partial(objective, train_x, train_y) # 目的関数に引数を固定しておく
-    study = optuna.create_study(direction='maximize') # Optuna で取り出す特徴量の数を最適化する
+    # selected_columns = get_selected_columns(train_x, train_y)
+    # selected_train_x = train_x.loc[:, selected_columns]
+    # selected_test_x = test_x.loc[:, selected_columns]
+    selected_train_x = train_x
+    selected_test_x = test_x
 
-    study.optimize(f, n_trials=20) # 試行回数を決定する
-    print('params:', study.best_params)# 発見したパラメータを出力する
-    best_feature_count = study.best_params['n_components']
-    x_pca, train_y = get_important_features(train_x, train_y, best_feature_count)  
-
-
-    n_splits = 10
-    num_class = 8
-    best_params = get_best_params(x_pca, train_y, num_class) # 最適ハイパーパラメータの探索
-
-    submission = np.zeros((len(test_x),num_class))
-    acc_scores = {}
-
-    kf = KFold(n_splits=n_splits, shuffle=True, random_state=0)
-    for i, (tr_idx, val_idx) in enumerate(kf.split(train_x, train_y)):
-        tr_x = train_x.iloc[tr_idx].reset_index(drop=True)
-        tr_y = train_y.iloc[tr_idx].reset_index(drop=True)
-        val_x = train_x.iloc[val_idx].reset_index(drop=True)
-        val_y = train_y.iloc[val_idx].reset_index(drop=True)
-
-        tr_dataset = lgb.Dataset(tr_x, tr_y)
-        val_dataset = lgb.Dataset(val_x, val_y, reference=tr_dataset)
-        model, evals_result = get_model(tr_dataset, val_dataset, best_params)
-        
-        # 学習曲線の描画
-        eval_metric_logloss = evals_result['eval']['multi_logloss']
-        train_metric_logloss = evals_result['train']['multi_logloss']
-        eval_metric_acc = evals_result['eval']['accuracy']
-        train_metric_acc = evals_result['train']['accuracy']
-        _, ax1 = plt.subplots(figsize=(8, 4))
-        ax1.plot(eval_metric_logloss, label='eval logloss', c='r')
-        ax1.plot(train_metric_logloss, label='train logloss', c='b')
-        ax1.set_ylabel('logloss')
-        ax1.set_xlabel('rounds')
-        ax1.legend(loc='upper right')
-        ax2 = ax1.twinx()
-        ax2.plot(eval_metric_acc, label='eval accuracy', c='g')
-        ax2.plot(train_metric_acc, label='train accuracy', c='y')
-        ax2.set_ylabel('accuracy')
-        ax2.legend(loc='lower right')
-        plt.savefig(f'{DATA_DIR}/learning_{i}.png')
-
-        y_pred = np.argmax(model.predict(val_x), axis=1) # 0~8の確率
-        acc = accuracy_score(val_y, y_pred)
-        acc_scores[i] = acc
-        print("#################################")
-        print(f"auc_score: {acc}")
-        print("#################################")
-        y_preda = model.predict(test_x, num_iteration=model.best_iteration) # 0~8の確率
-        submission += y_preda
-
-    submission_df = pd.DataFrame(submission/n_splits)
-    print("#################################")
-    print(submission_df)
-    print(best_params) 
-    print(acc_scores)
-    print(study.best_params)
-    print("#################################")
+    gridsearched_pipelines = {}
+    for pipeline_name, pipline in PIPELINES_GS.items():
+        print(f'GridsearchCV of {pipeline_name}')
+        params = GRID_SEARCH_PARAMS[pipeline_name]
+        gs = GridSearchCV(
+            estimator = pipline, 
+            param_grid = params, 
+        )
+        gs.fit(
+            selected_train_x,
+            train_y
+        )
+        print(gs.best_estimator_)
+        gridsearched_pipelines[pipeline_name] = gs.best_estimator_
     
-    submission_df.to_csv(f"{DATA_DIR}/my_submission18.csv", header=False)
+    for pipe_name, pipeline in gridsearched_pipelines.items():
+        PIPELINES[pipe_name] = pipeline
 
+    for pipe_name, pipeline in PIPELINES.items():
+        pipeline.fit(selected_train_x, train_y)
+        print(pipe_name, ': Fitting Done')
+
+
+
+
+
+   
 
 if __name__ == "__main__":
     main()

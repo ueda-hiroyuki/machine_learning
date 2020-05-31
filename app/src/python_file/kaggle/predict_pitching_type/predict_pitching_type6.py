@@ -195,26 +195,40 @@ def main():
         tr_dataset = lgb.Dataset(tr_x, tr_y)
         val_dataset = lgb.Dataset(val_x, val_y, reference=tr_dataset)
         model, evals_result = get_model(tr_dataset, val_dataset, best_params)
-        
-        # 学習曲線の描画
-        eval_metric_logloss = evals_result['eval']['multi_logloss']
-        train_metric_logloss = evals_result['train']['multi_logloss']
-        eval_metric_acc = evals_result['eval']['accuracy']
-        train_metric_acc = evals_result['train']['accuracy']
-        _, ax1 = plt.subplots(figsize=(8, 4))
-        ax1.plot(eval_metric_logloss, label='eval logloss', c='r')
-        ax1.plot(train_metric_logloss, label='train logloss', c='b')
-        ax1.set_ylabel('logloss')
-        ax1.set_xlabel('rounds')
-        ax1.legend(loc='upper right')
-        ax2 = ax1.twinx()
-        ax2.plot(eval_metric_acc, label='eval accuracy', c='g')
-        ax2.plot(train_metric_acc, label='train accuracy', c='y')
-        ax2.set_ylabel('accuracy')
-        ax2.legend(loc='lower right')
-        plt.savefig(f'{DATA_DIR}/learning_{i}.png')
 
-        y_pred = np.argmax(model.predict(val_x), axis=1) # 0~8の確率
+        pseudo_label = np.argmax(model.predict(test_x), axis=1) # 疑似ラベルとして扱う
+
+        meta_x = pd.concat([tr_x, val_x, test_x], axis=0)
+        meta_y = pd.concat([tr_y, val_y, pseudo_label], axis=0)
+
+
+
+
+        
+        # # 学習曲線の描画
+        # eval_metric_logloss = evals_result['eval']['multi_logloss']
+        # train_metric_logloss = evals_result['train']['multi_logloss']
+        # eval_metric_acc = evals_result['eval']['accuracy']
+        # train_metric_acc = evals_result['train']['accuracy']
+        # _, ax1 = plt.subplots(figsize=(8, 4))
+        # ax1.plot(eval_metric_logloss, label='eval logloss', c='r')
+        # ax1.plot(train_metric_logloss, label='train logloss', c='b')
+        # ax1.set_ylabel('logloss')
+        # ax1.set_xlabel('rounds')
+        # ax1.legend(loc='upper right')
+        # ax2 = ax1.twinx()
+        # ax2.plot(eval_metric_acc, label='eval accuracy', c='g')
+        # ax2.plot(train_metric_acc, label='train accuracy', c='y')
+        # ax2.set_ylabel('accuracy')
+        # ax2.legend(loc='lower right')
+        # plt.savefig(f'{DATA_DIR}/learning_{i}.png')
+
+        
+
+
+
+
+
         acc = accuracy_score(val_y, y_pred)
         accs[i] = acc
         print("#################################")
