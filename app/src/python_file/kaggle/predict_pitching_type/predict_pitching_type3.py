@@ -112,7 +112,7 @@ PIPELINES = {
     ]),
     'mlp_2': Pipeline([
         ('scl',StandardScaler()),
-        ('est',MLPClassifier(hidden_layer_sizes=(3,3,3),max_iter=500,random_state=1))
+        ('est',MLPClassifier(hidden_layer_sizes=(3,3),max_iter=500,random_state=1))
     ]),
     'adb_1': Pipeline([
         ('est',AdaBoostClassifier(random_state=1))
