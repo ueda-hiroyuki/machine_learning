@@ -198,6 +198,7 @@ def get_model(tr_dataset: t.Any, val_dataset: t.Any, params: t.Dict[str, t.Any])
 
 def objective(X, y, trial):
     """最適化する目的関数"""
+    logging.info("START OBJECTIVE !!")
     gbm = lgb.LGBMClassifier(
         objective="multiclass",
         boosting_type= 'gbdt', 
@@ -219,10 +220,11 @@ def objective(X, y, trial):
     accuracy = accuracy_score(val_y, y_pred)
     return accuracy
 
-def get_important_features(train_x: t.Any, train_y: t.Any, best_feature_count: int):
+def get_important_features(train_x: t.Any, test_x: t.Any, best_feature_count: int):
     pca = PCA(n_components=best_feature_count).fit(train_x)
-    x_pca = pca.transform(train_x)
-    return x_pca, train_y
+    train_x_pca = pca.transform(train_x)
+    test_x_pca = pca.transform(test_x)
+    return train_x_pca, test_x_pca
 
 
 def main():
@@ -270,15 +272,31 @@ def main():
     train_y = train.loc[:,"球種"]
     test_x = test.drop("球種", axis=1)
 
+    # f = partial(objective, train_x, test_x) # 目的関数に引数を固定しておく
+    # study = optuna.create_study(direction='maximize') # Optuna で取り出す特徴量の数を最適化する
+
+    # study.optimize(f, n_trials=10) # 試行回数を決定する
+    # print('params:', study.best_params)# 発見したパラメータを出力する
+    # best_feature_count = study.best_params['n_components']
+    # train_x_pca, test_x_pca = get_important_features(train_x, test_x, best_feature_count)  
+
+    train_x_pca, test_x_pca = train_x, test_x
+
+    model_names = [c for c in PIPELINES]
     best_params = {}
     for (param_name, param), (pipeline_name, pipeline) in zip(GRID_SEARCH_PARAMS.items(), PIPELINES.items()):
+        logging.info(f'{param_name} GRID SEARCH STARTED !!')
         gscv = GridSearchCV(pipeline, param, cv=2, refit=True, iid=False)
-        gscv.fit(train_x, train_y)
+        gscv.fit(train_x_pca, train_y)
         best_param = gscv.best_params_
         best_params[pipeline_name] = best_param
         print("#############################")
         print(best_param)
         print("#############################")
+
+    
+    
+
 
     
 
