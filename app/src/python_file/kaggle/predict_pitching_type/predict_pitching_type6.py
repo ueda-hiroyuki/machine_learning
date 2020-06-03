@@ -1,4 +1,5 @@
 import gc
+import joblib
 import logging
 import collections
 import typing as t
@@ -21,7 +22,7 @@ from python_file.kaggle.common import common_funcs as cf
 from sklearn.feature_selection import RFE
 from sklearn.model_selection import train_test_split, KFold, StratifiedKFold, cross_val_predict, GridSearchCV
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, LabelEncoder, OneHotEncoder
-from sklearn.metrics import mean_squared_error, r2_score, accuracy_score, roc_auc_score, precision_recall_curve, auc, f1_score
+from sklearn.metrics import mean_squared_error, r2_score, accuracy_score, log_loss
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.tree import DecisionTreeClassifier
@@ -87,75 +88,83 @@ PIPELINES = {
     ]),
 }
 
+GRID_SEARCH_PARAMS = {
+    'knn':{
+        'est__n_neighbors':[2,3,4],
+        'est__weights':['uniform','distance'],
+        'est__algorithm':['auto'],
+        'est__leaf_size':[10,100],
+        'est__p':[1,2]
+    },
+    'logistic': {
+        "est__C":[0.1, 0.2, 0.5,  1],
+        "est__penalty":['l1', 'l2'],
+        'est__class_weight':['balanced'],
+        'est__max_iter':[1000, 2000]
+    },
+    'tree':{
+        'est__max_leaf_nodes': [10, 100],
+        'est__min_samples_split': [100, 200, 500],
+        'est__max_depth': [5, 10],
+        'est__criterion': ['gini', 'entropy'],
+        'est__class_weight':['balanced']
+    },
+    'rf':{
+        'est__min_samples_split':[5, 10],
+        'est__min_samples_leaf':[100, 200, 500],
+        'est__max_depth': [5, 8],
+        "est__criterion": ["entropy"],
+        'est__class_weight':['balanced', None]
+    },
+    'gb':{
+        'est__loss':['deviance','exponential'],
+        'est__learning_rate':[0.01, 0.1],
+        'est__max_depth':[5, 10],
+        'est__min_samples_split':[0.1, 0.5],
+        'est__min_samples_leaf':[100, 200, 500],
+    },
+    'SVC':{
+        "est__C":[0.1, 0.2, 0.5,  1],
+        'est__class_weight':['balanced'],
+        'est__max_iter':[1000, 2000]
+    },
+    'mlp':{
+        "est__hidden_layer_sizes":[(10,10), (10,10,10), (10,10,10), (10,10,10,10)],
+        "est__alpha":[0.1, 0.2, 0.5],
+        'est__early_stopping':[True],
+        'est__max_iter':[1000, 2000]
+    },
+    'adb':{
+        'est__n_estimators':[1000, 2000],
+        'est__learning_rate':[0.01, 0.1, 0.2]
+    }
+}
 # GRID_SEARCH_PARAMS = {
 #     'knn':{
 #         'est__n_neighbors':[2,3,4],
-#         'est__weights':['uniform','distance'],
-#         'est__algorithm':['auto'],
-#         'est__leaf_size':[10,100],
-#         'est__p':[1,2]
 #     },
 #     'logistic': {
 #         "est__C":[0.1, 0.2, 0.5,  1],
-#         "est__penalty":['l1', 'l2'],
-#         'est__class_weight':['balanced'],
-#         'est__max_iter':[1000, 2000]
 #     },
 #     'tree':{
-#         'est__max_leaf_nodes': [10],
-#         'est__min_samples_split': [5, 10],
 #         'est__max_depth': [5, 10],
-#         'est__criterion': ['gini', 'entropy'],
-#         'est__class_weight':['balanced', None]
 #     },
 #     'rf':{
 #         'est__min_samples_split':[5, 10],
-#         'est__min_samples_leaf':[5, 10],
-#         'est__max_depth': [5, 8],
-#         "est__criterion": ["entropy"],
-#         'est__class_weight':['balanced', None]
 #     },
 #     'gb':{
-#         'est__loss':['deviance','exponential'],
-#         'est__learning_rate':[ 0.01, 0.1],
-#         'est__max_depth':[5, 10],
-#         'est__min_samples_split':[0.1, 0.5],
-#         'est__min_samples_leaf':[3, 5],
+#         'est__learning_rate':[0.01, 0.1],
 #     },
 #     'SVC':{
 #         "est__C":[0.1, 0.2, 0.5,  1],
-#         'est__class_weight':['balanced'],
-#         'est__max_iter':[1000, 2000]
 #     },
 #     'mlp':{
 #         "est__hidden_layer_sizes":[(10,10), (10,10,10), (10,10,10), (10,10,10,10)],
-#         "est__alpha":[0.1, 0.2, 0.5],
-#         'est__early_stopping':[True],
-#         'est__max_iter':[1000, 2000]
 #     },
 #     'adb':{
-#         'est__n_estimators':[1000, 2000],
-#         'est__learning_rate':[0.01, 0.1, 0.2]
+#         'est__n_estimators':[100, 200],
 #     }
 # }
-GRID_SEARCH_PARAMS = {
-    'knn':{
-    },
-    'logistic': {
-    },
-    'tree':{
-    },
-    'rf':{
-    },
-    'gb':{
-    },
-    'SVC':{
-    },
-    'mlp':{
-    },
-    'adb':{
-    }
-}
 
 def get_best_params(train_x: t.Any, train_y: t.Any, num_class: int) -> t.Any:
     tr_x, val_x, tr_y, val_y = train_test_split(train_x, train_y, test_size=0.2, random_state=1)
@@ -256,6 +265,8 @@ def main():
         right_on=['年度','選手ID'],
     ).drop(['選手ID', '投球位置区域'], axis=1).fillna(0)
 
+    merged_data = merged_data.sample(n=5000, random_state=42).reset_index(drop=True)
+
     use = merged_data.loc[:, "use"]
     merged_data = merged_data.drop(["use", "位置", "年度"], axis=1)
 
@@ -281,18 +292,63 @@ def main():
     # train_x_pca, test_x_pca = get_important_features(train_x, test_x, best_feature_count)  
 
     train_x_pca, test_x_pca = train_x, test_x
-
+    
+    best_estimetors = {}
     model_names = [c for c in PIPELINES]
-    best_params = {}
+
     for (param_name, param), (pipeline_name, pipeline) in zip(GRID_SEARCH_PARAMS.items(), PIPELINES.items()):
         logging.info(f'{param_name} GRID SEARCH STARTED !!')
-        gscv = GridSearchCV(pipeline, param, cv=2, refit=True, iid=False)
+        gscv = GridSearchCV(pipeline, param, cv=2, refit=True)
         gscv.fit(train_x_pca, train_y)
-        best_param = gscv.best_params_
-        best_params[pipeline_name] = best_param
-        print("#############################")
-        print(best_param)
-        print("#############################")
+        best_estimetor = gscv.best_estimator_
+        best_estimetors[pipeline_name] = best_estimetor
+
+    n_splits = 5
+    meta_model = LogisticRegression() # meta_modelは線形モデル
+    submission = np.zeros((len(test_x_pca),NUM_CLASS))
+    skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=0)
+    for idx, (train_idx, val_idx) in enumerate(skf.split(train_x_pca, train_y)):
+        logging.info(f"START {idx}th split !!")
+        tr_x = train_x_pca.iloc[train_idx].reset_index(drop=True)
+        tr_y = train_y.iloc[train_idx].reset_index(drop=True)
+        val_x = train_x_pca.iloc[val_idx].reset_index(drop=True)
+        val_y = train_y.iloc[val_idx].reset_index(drop=True)
+
+        train_x_base, valid_x_base, train_y_base, valid_y_base = train_test_split(tr_x, tr_y, test_size=0.2, stratify=tr_y)
+        base_y_preds = []
+        valid_y_preds = []
+        test_y_preds = []
+        for model_name in model_names:
+            logging.info(f"Start Learning {model_name} model !!")
+            base_clf = best_estimetors[model_name]
+            base_clf.fit(train_x_base, train_y_base)
+            base_y_pred = base_clf.predict(valid_x_base)
+            base_y_preds.append(base_y_pred)
+
+            valid_y_pred = base_clf.predict(val_x)
+            valid_y_preds.append(valid_y_pred)
+            test_y_pred = base_clf.predict(test_x_pca)
+            test_y_preds.append(test_y_pred)
+
+        base_preds = pd.DataFrame(base_y_preds).T
+        valid_preds = pd.DataFrame(valid_y_preds).T
+        test_preds = pd.DataFrame(test_y_preds).T
+
+        meta_model.fit(base_preds, valid_y_base)
+        meta_y_preda = meta_model.predict_proba(valid_preds)
+        test_y_preda = meta_model.predict_proba(test_preds)
+        logloss = log_loss(val_y, meta_y_preda)
+        print("#########################################")
+        print(f"logloss is {logloss} !!")
+        submission += pd.DataFrame(test_y_preda)/n_splits
+
+    submission.to_csv(f"{DATA_DIR}/my_submission21.csv", header=False)
+    print(submission)
+
+
+
+        
+
 
     
     

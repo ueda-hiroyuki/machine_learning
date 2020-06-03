@@ -9,7 +9,6 @@ import typing as t
 import seaborn as sns
 import matplotlib as mpl
 import matplotlib.pyplot as plt
-import featuretools as ft
 import category_encoders as ce # カテゴリ変数encording用ライブラリ
 import optuna #ハイパーパラメータチューニング自動化ライブラリ
 from optuna.integration import lightgbm_tuner #LightGBM用Stepwise Tuningに必要
