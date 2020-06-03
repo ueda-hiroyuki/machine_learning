@@ -90,11 +90,11 @@ PIPELINES = {
 
 GRID_SEARCH_PARAMS = {
     'knn':{
-        'est__n_neighbors':[2,3,4],
+        'est__n_neighbors':[10, 20, 50],
         'est__weights':['uniform','distance'],
         'est__algorithm':['auto'],
-        'est__leaf_size':[10,100],
-        'est__p':[1,2]
+        'est__leaf_size':[10, 100],
+        'est__p':[1, 2]
     },
     'logistic': {
         "est__C":[0.1, 0.2, 0.5,  1],
@@ -114,7 +114,7 @@ GRID_SEARCH_PARAMS = {
         'est__min_samples_leaf':[100, 200, 500],
         'est__max_depth': [5, 8],
         "est__criterion": ["entropy"],
-        'est__class_weight':['balanced', None]
+        'est__class_weight':['balanced']
     },
     'gb':{
         'est__loss':['deviance','exponential'],
@@ -214,7 +214,7 @@ def objective(X, y, trial):
         n_jobs = 4,
         n_estimators=10000,
     )
-    n_components = trial.suggest_int('n_components', 1, len(list(X.columns))),
+    n_components = trial.suggest_int('n_components', 10, len(list(X.columns))),
     pca = PCA(n_components=n_components[0]).fit(X)
     x_pca = pca.transform(X)
     tr_x, val_x, tr_y, val_y = train_test_split(x_pca, y, random_state=1)
@@ -265,7 +265,7 @@ def main():
         right_on=['年度','選手ID'],
     ).drop(['選手ID', '投球位置区域'], axis=1).fillna(0)
 
-    merged_data = merged_data.sample(n=5000, random_state=42).reset_index(drop=True)
+    # merged_data = merged_data.sample(n=5000, random_state=42).reset_index(drop=True)
 
     use = merged_data.loc[:, "use"]
     merged_data = merged_data.drop(["use", "位置", "年度"], axis=1)
@@ -283,27 +283,27 @@ def main():
     train_y = train.loc[:,"球種"]
     test_x = test.drop("球種", axis=1)
 
-    # f = partial(objective, train_x, test_x) # 目的関数に引数を固定しておく
-    # study = optuna.create_study(direction='maximize') # Optuna で取り出す特徴量の数を最適化する
+    f = partial(objective, train_x, test_x) # 目的関数に引数を固定しておく
+    study = optuna.create_study(direction='maximize') # Optuna で取り出す特徴量の数を最適化する
 
-    # study.optimize(f, n_trials=10) # 試行回数を決定する
-    # print('params:', study.best_params)# 発見したパラメータを出力する
-    # best_feature_count = study.best_params['n_components']
-    # train_x_pca, test_x_pca = get_important_features(train_x, test_x, best_feature_count)  
+    study.optimize(f, n_trials=10) # 試行回数を決定する
+    print('params:', study.best_params)# 発見したパラメータを出力する
+    best_feature_count = study.best_params['n_components']
+    train_x_pca, test_x_pca = get_important_features(train_x, test_x, best_feature_count)  
 
-    train_x_pca, test_x_pca = train_x, test_x
+    # train_x_pca, test_x_pca = train_x, test_x
     
     best_estimetors = {}
     model_names = [c for c in PIPELINES]
 
     for (param_name, param), (pipeline_name, pipeline) in zip(GRID_SEARCH_PARAMS.items(), PIPELINES.items()):
         logging.info(f'{param_name} GRID SEARCH STARTED !!')
-        gscv = GridSearchCV(pipeline, param, cv=2, refit=True)
+        gscv = GridSearchCV(pipeline, param, cv=5, refit=True)
         gscv.fit(train_x_pca, train_y)
         best_estimetor = gscv.best_estimator_
         best_estimetors[pipeline_name] = best_estimetor
 
-    n_splits = 5
+    n_splits = 10
     meta_model = LogisticRegression() # meta_modelは線形モデル
     submission = np.zeros((len(test_x_pca),NUM_CLASS))
     skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=0)
