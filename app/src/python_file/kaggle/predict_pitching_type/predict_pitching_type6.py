@@ -283,7 +283,7 @@ def main():
     train_y = train.loc[:,"球種"]
     test_x = test.drop("球種", axis=1)
 
-    f = partial(objective, train_x, test_x) # 目的関数に引数を固定しておく
+    f = partial(objective, train_x, train_y) # 目的関数に引数を固定しておく
     study = optuna.create_study(direction='maximize') # Optuna で取り出す特徴量の数を最適化する
 
     study.optimize(f, n_trials=10) # 試行回数を決定する
