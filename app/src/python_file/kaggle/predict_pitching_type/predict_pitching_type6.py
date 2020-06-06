@@ -10,7 +10,6 @@ import typing as t
 import seaborn as sns
 import matplotlib as mpl
 import matplotlib.pyplot as plt
-import featuretools as ft
 import category_encoders as ce # カテゴリ変数encording用ライブラリ
 import optuna #ハイパーパラメータチューニング自動化ライブラリ
 from optuna.integration import lightgbm_tuner #LightGBM用Stepwise Tuningに必要
@@ -50,7 +49,6 @@ TRAIN_PITCH_PATH = f"{DATA_DIR}/train_pitch.csv"
 TRAIN_PLAYER_PATH = f"{DATA_DIR}/train_player.csv"
 TEST_PITCH_PATH = f"{DATA_DIR}/test_pitch.csv"
 TEST_PLAYER_PATH = f"{DATA_DIR}/test_player.csv"
-SUBMISSION_PATH = f"{DATA_DIR}/sample_submit_ball_type.csv"
 
 PITCH_REMOVAL_COLUMNS = ["日付", "時刻", "試合内連番", "成績対象打者ID", "成績対象投手ID", "打者試合内打席数", "試合ID"]
 PLAYER_REMOVAL_COLUMNS = ["出身高校名", "出身大学名", "生年月日", "出身地", "出身国", "チームID", "社会人","ドラフト年","ドラフト種別","ドラフト順位", "年俸", "育成選手F"]
@@ -247,7 +245,6 @@ def main():
     train_player = pd.read_csv(TRAIN_PLAYER_PATH)
     test_pitch = pd.read_csv(TEST_PITCH_PATH)
     test_player = pd.read_csv(TEST_PLAYER_PATH)
-    sub = pd.read_csv(SUBMISSION_PATH)
 
     train_pitch["use"] = "train"
     test_pitch["use"] = "test"
