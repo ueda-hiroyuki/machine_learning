@@ -58,17 +58,17 @@ NUM_CLASS = 8
 PIPELINES = {
     'knn': Pipeline([
         ('scl',StandardScaler()),
-        ('est',KNeighborsClassifier())
+        ('est',KNeighborsClassifier(n_jobs=4))
     ]),
     'logistic': Pipeline([
         ('scl',StandardScaler()),
-        ('est',LogisticRegression(random_state=1))
+        ('est',LogisticRegression(random_state=1, n_jobs=4))
     ]),
     'tree': Pipeline([
         ('est',DecisionTreeClassifier(random_state=1))
     ]),
     'rf': Pipeline([
-        ('est',RandomForestClassifier(random_state=1))
+        ('est',RandomForestClassifier(random_state=1, n_jobs=4))
     ]),
     'gb': Pipeline([
         ('est',GradientBoostingClassifier(random_state=1))
@@ -86,83 +86,107 @@ PIPELINES = {
     ]),
 }
 
-GRID_SEARCH_PARAMS = {
-    'knn':{
-        'est__n_neighbors':[10, 20, 50],
-        'est__weights':['uniform','distance'],
-        'est__algorithm':['auto'],
-        'est__leaf_size':[10, 100],
-        'est__p':[1, 2]
-    },
-    'logistic': {
-        "est__C":[0.1, 0.2, 0.5,  1],
-        "est__penalty":['l1', 'l2'],
-        'est__class_weight':['balanced'],
-        'est__max_iter':[1000, 2000]
-    },
-    'tree':{
-        'est__max_leaf_nodes': [10, 100],
-        'est__min_samples_split': [100, 200, 500],
-        'est__max_depth': [5, 10],
-        'est__criterion': ['gini', 'entropy'],
-        'est__class_weight':['balanced']
-    },
-    'rf':{
-        'est__min_samples_split':[5, 10],
-        'est__min_samples_leaf':[100, 200, 500],
-        'est__max_depth': [5, 8],
-        "est__criterion": ["entropy"],
-        'est__class_weight':['balanced']
-    },
-    'gb':{
-        'est__loss':['deviance','exponential'],
-        'est__learning_rate':[0.01, 0.1],
-        'est__max_depth':[5, 10],
-        'est__min_samples_split':[0.1, 0.5],
-        'est__min_samples_leaf':[100, 200, 500],
-    },
-    'SVC':{
-        "est__C":[0.1, 0.2, 0.5,  1],
-        'est__class_weight':['balanced'],
-        'est__max_iter':[1000, 2000]
-    },
-    'mlp':{
-        "est__hidden_layer_sizes":[(10,10), (10,10,10), (10,10,10), (10,10,10,10)],
-        "est__alpha":[0.1, 0.2, 0.5],
-        'est__early_stopping':[True],
-        'est__max_iter':[1000, 2000]
-    },
-    'adb':{
-        'est__n_estimators':[1000, 2000],
-        'est__learning_rate':[0.01, 0.1, 0.2]
-    }
-}
 # GRID_SEARCH_PARAMS = {
 #     'knn':{
-#         'est__n_neighbors':[2,3,4],
+#         'est__n_neighbors':[20],
+#         'est__weights':['uniform'],
+#         'est__algorithm':['auto'],
+#         'est__leaf_size':[50],
+#         'est__p':[2]
 #     },
 #     'logistic': {
-#         "est__C":[0.1, 0.2, 0.5,  1],
+#         "est__C":[0.1],
+#         "est__penalty":['l2'],
+#         'est__class_weight':['balanced'],
+#         'est__max_iter':[1000]
 #     },
 #     'tree':{
-#         'est__max_depth': [5, 10],
+#         'est__max_leaf_nodes': [10],
+#         'est__min_samples_split': [10],
+#         'est__max_depth': [10],
+#         'est__criterion': ['gini'],
+#         'est__class_weight':['balanced']
 #     },
 #     'rf':{
-#         'est__min_samples_split':[5, 10],
+#         'est__min_samples_split':[10],
+#         'est__min_samples_leaf':[10],
+#         'est__max_depth': [10],
+#         "est__criterion": ["gini"],
+#         'est__class_weight':['balanced']
 #     },
 #     'gb':{
-#         'est__learning_rate':[0.01, 0.1],
+#         'est__loss':['deviance'],
+#         'est__learning_rate':[0.01],
+#         'est__max_depth':[10],
+#         'est__min_samples_split':[10],
+#         'est__min_samples_leaf':[10],
 #     },
 #     'SVC':{
-#         "est__C":[0.1, 0.2, 0.5,  1],
+#         "est__C":[0.1],
+#         'est__class_weight':['balanced'],
+#         'est__max_iter':[1000]
 #     },
 #     'mlp':{
-#         "est__hidden_layer_sizes":[(10,10), (10,10,10), (10,10,10), (10,10,10,10)],
+#         "est__hidden_layer_sizes":[(50,50,50,50)],
+#         'est__early_stopping':[True],
+#         'est__max_iter':[1000]
 #     },
 #     'adb':{
-#         'est__n_estimators':[100, 200],
+#         'est__n_estimators':[1000],
+#         'est__learning_rate':[0.01]
 #     }
 # }
+PARAMS = {
+    'knn':{
+        'est__n_neighbors':20,
+        'est__weights':'uniform',
+        'est__algorithm':'auto',
+        'est__leaf_size':50,
+        'est__p':2
+    },
+    'logistic': {
+        "est__C":0.1,
+        "est__penalty":'l2',
+        'est__class_weight':'balanced',
+        'est__max_iter':1000
+    },
+    'tree':{
+        'est__max_leaf_nodes': 10,
+        'est__min_samples_split': 10,
+        'est__max_depth': 10,
+        'est__criterion': 'gini',
+        'est__class_weight': 'balanced'
+    },
+    'rf':{
+        'est__min_samples_split': 10,
+        'est__min_samples_leaf': 10,
+        'est__max_depth': 10,
+        "est__criterion": "gini",
+        'est__class_weight': 'balanced'
+    },
+    'gb':{
+        'est__loss': 'deviance',
+        'est__learning_rate': 0.1,
+        'est__max_depth': 10,
+        'est__min_samples_split': 10,
+        'est__min_samples_leaf': 10,
+        'est__n_estimators': 1000
+    },
+    'SVC':{
+        "est__C": 0.1,
+        'est__class_weight': 'balanced',
+        'est__max_iter':1000
+    },
+    'mlp':{
+        "est__hidden_layer_sizes": (50,50,50,50),
+        'est__early_stopping': True,
+        'est__max_iter':1000
+    },
+    'adb':{
+        'est__n_estimators': 1000,
+        'est__learning_rate': 0.1
+    }
+}
 
 def get_best_params(train_x: t.Any, train_y: t.Any, num_class: int) -> t.Any:
     tr_x, val_x, tr_y, val_y = train_test_split(train_x, train_y, test_size=0.2, random_state=1)
@@ -293,12 +317,18 @@ def main():
     best_estimetors = {}
     model_names = [c for c in PIPELINES]
 
-    for (param_name, param), (pipeline_name, pipeline) in zip(GRID_SEARCH_PARAMS.items(), PIPELINES.items()):
-        logging.info(f'{param_name} GRID SEARCH STARTED !!')
-        gscv = GridSearchCV(pipeline, param, cv=5, refit=True)
-        gscv.fit(train_x_pca, train_y)
-        best_estimetor = gscv.best_estimator_
-        best_estimetors[pipeline_name] = best_estimetor
+    # for (param_name, param), (pipeline_name, pipeline) in zip(GRID_SEARCH_PARAMS.items(), PIPELINES.items()):
+    #     logging.info(f'{param_name} GRID SEARCH STARTED !!')
+    #     gscv = GridSearchCV(pipeline, param, cv=5, verbose=10, n_jobs=6)
+    #     gscv.fit(train_x_pca, train_y)
+    #     best_estimetor = gscv.best_estimator_
+    #     best_estimetors[pipeline_name] = best_estimetor
+
+    for (param_name, param), (pipeline_name, pipeline) in zip(PARAMS.items(), PIPELINES.items()):
+        logging.info(f'{param_name} STARTED !!')
+        pipeline.set_params(**param)
+        est = pipeline.fit(train_x_pca, train_y)
+        best_estimetors[pipeline_name] = est
 
     n_splits = 10
     meta_model = LogisticRegression() # meta_modelは線形モデル
