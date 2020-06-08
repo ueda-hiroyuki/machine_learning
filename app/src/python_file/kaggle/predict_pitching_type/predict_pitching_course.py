@@ -158,13 +158,36 @@ def get_model(tr_dataset: t.Any, val_dataset: t.Any, params: t.Dict[str, t.Any])
     return model
 
 
-def gen_r2_score_fig(score_list, n_splits, save_dir):
-    plt.figure()
-    plt.plot(range(1, n_splits+1), marker='o')
-    plt.xlabel("epochs")
-    plt.ylabel("r2_score")
-    plt.xlim(0, n_splits+1)
-    plt.savefig(f"{save_dir}/r2_score.png")
+def objective(X, y, trial):
+    """最適化する目的関数"""
+    gbm = lgb.LGBMClassifier(
+        objective="multiclass",
+        boosting_type= 'gbdt', 
+        n_jobs = 4,
+        n_estimators=10000,
+    )
+    n_components = trial.suggest_int('n_components', 1, len(list(X.columns))),
+    pca = PCA(n_components=n_components[0]).fit(X)
+    x_pca = pca.transform(X)
+    tr_x, val_x, tr_y, val_y = train_test_split(x_pca, y, random_state=1)
+    gbm.fit(
+        tr_x, 
+        tr_y,
+        eval_set=[(val_x, val_y)],
+        early_stopping_rounds=20,
+        verbose=50
+    )
+    y_pred = gbm.predict(val_x)
+    accuracy = accuracy_score(val_y, y_pred)
+    return accuracy
+
+
+def get_important_features(train_x: t.Any, test_x: t.Any, best_feature_count: int):
+    pca = PCA(n_components=best_feature_count).fit(train_x)
+    train_x_pca = pca.transform(train_x)
+    test_x_pca = pca.transform(test_x)
+    return train_x_pca, test_x_pca
+
 
 
 def main():
@@ -191,7 +214,6 @@ def main():
     use = merged_data.loc[:, "use"]
     merged_data = merged_data.drop(["use"], axis=1)
     encorded_data = cf.label_encorder(merged_data)
-    # encorded_data = cf.standardize(encorded_data) # 標準化
     encorded_data = pd.concat([encorded_data, use], axis=1)
  
     train = encorded_data[encorded_data["use"] == "train"].drop("use", axis=1)
@@ -201,36 +223,41 @@ def main():
     train_y = train.loc[:,"投球位置区域"].astype(int)
     test_x = test.drop("投球位置区域", axis=1).reset_index(drop=True)
 
-    n_splits = 3
+
+    f = partial(objective, train_x, train_y) # 目的関数に引数を固定しておく
+    study = optuna.create_study(direction='maximize') # Optuna で取り出す特徴量の数を最適化する
+
+    study.optimize(f, n_trials=10) # 試行回数を決定する
+    print('params:', study.best_params)# 発見したパラメータを出力する
+    best_feature_count = study.best_params['n_components']
+    train_x_pca, test_x_pca = get_important_features(train_x, train_y, best_feature_count)  
+
+    n_splits = 10
     num_class = 13
-    best_params = get_best_params(train_x, train_y, num_class) # 最適ハイパーパラメータの探索
+    best_params = get_best_params(train_x_pca, train_y, num_class) # 最適ハイパーパラメータの探索
     
-    submission = np.zeros((len(test_x),num_class))
-    importances = pd.DataFrame(np.zeros(len(test_x.columns)), index=test_x.columns, columns=['importance'])
+    submission = np.zeros((len(test_x_pca),num_class))
     kf = KFold(n_splits=n_splits, shuffle=True, random_state=0)
-    for tr_idx, val_idx in kf.split(train_x, train_y):
-        tr_x = train_x.iloc[tr_idx].reset_index(drop=True)
+    for tr_idx, val_idx in kf.split(train_x_pca, train_y):
+        tr_x = train_x_pca.iloc[tr_idx].reset_index(drop=True)
         tr_y = train_y.iloc[tr_idx].reset_index(drop=True)
-        val_x = train_x.iloc[val_idx].reset_index(drop=True)
+        val_x = train_x_pca.iloc[val_idx].reset_index(drop=True)
         val_y = train_y.iloc[val_idx].reset_index(drop=True)
 
         tr_dataset = lgb.Dataset(tr_x, tr_y)
         val_dataset = lgb.Dataset(val_x, val_y, reference=tr_dataset)
         model = get_model(tr_dataset, val_dataset, best_params)
-        y_pred = model.predict(test_x, num_iteration=model.best_iteration)
+        y_pred = model.predict(test_x_pca, num_iteration=model.best_iteration)
         submission += y_pred
-        importance = pd.DataFrame(model.feature_importance(), index=test_x.columns, columns=['importance'])
-        importances += importance
+        
 
     submission_df = pd.DataFrame(submission/n_splits)
-    importances_df = importances.sort_values('importance') / n_splits
-    print("#################submission & best_params & importances################")
+    print("#################submission & best_params################")
     print(submission_df)
     print(best_params) 
-    print(importances_df)
     print("#################################")
     
-    submission_df.to_csv(f"{DATA_DIR}/submission_pitching_course4.csv", header=False)
+    submission_df.to_csv(f"{DATA_DIR}/submission_pitching_course5   .csv", header=False)
 
 
 if __name__ == "__main__":
