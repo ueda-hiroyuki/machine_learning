@@ -8,12 +8,16 @@ import typing as t
 import seaborn as sns
 import matplotlib as mpl
 import matplotlib.pyplot as plt
+import category_encoders as ce # カテゴリ変数encording用ライブラリ
 import optuna #ハイパーパラメータチューニング自動化ライブラリ
+from functools import partial
 from optuna.integration import lightgbm_tuner #LightGBM用Stepwise Tuningに必要
+from sklearn.impute import SimpleImputer 
+from sklearn.decomposition import PCA
 from python_file.kaggle.common import common_funcs as cf
 from sklearn.model_selection import train_test_split, KFold, StratifiedKFold, GridSearchCV, RandomizedSearchCV
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, LabelEncoder, OneHotEncoder
-from sklearn.metrics import mean_squared_error, r2_score
+from sklearn.metrics import mean_squared_error, r2_score, accuracy_score
 
 
 """
@@ -37,88 +41,9 @@ TRAIN_PITCH_PATH = f"{DATA_DIR}/train_pitch.csv"
 TRAIN_PLAYER_PATH = f"{DATA_DIR}/train_player.csv"
 TEST_PITCH_PATH = f"{DATA_DIR}/test_pitch.csv"
 TEST_PLAYER_PATH = f"{DATA_DIR}/test_player.csv"
-SUBMISSION_PATH = f"{DATA_DIR}/sample_submit_ball_type.csv"
-PITCH_REMOVAL_COLUMNS = [
-    "日付", 
-    "時刻", 
-    "年度", 
-    "試合内連番", 
-    "成績対象打者ID", 
-    "成績対象投手ID", 
-    "打者試合内打席数",
-    "投手役割",
-    "イニング",
-    # "試合ID",
-    "表裏",
-    # "一塁走者ID",
-    # "二塁走者ID",
-    # "三塁走者ID",
-    # "球場名",
-    "プレイ前ホームチーム得点数",
-    "プレイ前アウェイチーム得点数",
-    # "アウェイチームID",
-    # "球場ID",
-    # "打者チームID",
-    "試合種別詳細",
-    # "プレイ前アウト数",
-    "ホームチームID",
-    # "左翼手ID",
-    # "データ内連番",
-    "投手登板順",
-    # "打者ID",
-    # "打者打順",
-    # "試合内投球数",
-    # "一塁手ID",
-    # "二塁手ID",
-    # "投手イニング内投球数",
-    # "イニング内打席数",
-]
-PLAYER_REMOVAL_COLUMNS = [
-    "出身高校名", 
-    "出身大学名", 
-    "生年月日", 
-    "位置", 
-    "出身地", 
-    "出身国", 
-    "年度", 
-    "チームID", 
-    "社会人",
-    "育成選手F",
-    "投",
-    "打",
-    "ドラフト種別",
-    "ドラフト順位",
-    "血液型",
-]
-LABEL_ENCORDER_COLUMNS = [
-    "球場名", 
-    "試合種別詳細", 
-    "表裏", 
-    "投手投球左右", 
-    "投手役割", 
-    "打者打席左右", 
-    "打者守備位置", 
-    "プレイ前走者状況", 
-    "チーム名", 
-    "選手名", 
-    "投", 
-    "打", 
-    "血液型"
-]
+PITCH_REMOVAL_COLUMNS = ["日付", "時刻", "試合内連番", "成績対象打者ID", "成績対象投手ID", "打者試合内打席数", "試合ID"]
+PLAYER_REMOVAL_COLUMNS = ["出身高校名", "出身大学名", "生年月日", "出身地", "出身国", "チームID", "社会人","ドラフト年","ドラフト種別","ドラフト順位", "年俸", "育成選手F"]
 
-def remove_columns(df):
-    df = df.drop(REMOVAL_COLUMNS, axis=1).fillna(0)
-    return df
-
-
-def label_encorder(col: pd.Series) -> pd.DataFrame:
-    if col.dtypes == "object":
-        encorded_col = LabelEncoder().fit_transform(col)
-        print(encorded_col)
-        return encorded_col
-    else:
-        print(col)
-        return col
 
 
 def get_best_params(train_x: t.Any, train_y: t.Any, num_class: int) -> t.Any:
@@ -138,8 +63,8 @@ def get_best_params(train_x: t.Any, train_y: t.Any, num_class: int) -> t.Any:
         params,
         lgb_train,
         valid_sets=lgb_eval,
-        num_boost_round=500,
-        early_stopping_rounds=5,
+        num_boost_round=10000,
+        early_stopping_rounds=20,
         verbose_eval=10,
         best_params=best_params,
         tuning_history=tuning_history
@@ -152,8 +77,8 @@ def get_model(tr_dataset: t.Any, val_dataset: t.Any, params: t.Dict[str, t.Any])
         params=params,
         train_set=tr_dataset,
         valid_sets=val_dataset,
-        early_stopping_rounds=5,
-        num_boost_round=500,
+        early_stopping_rounds=20,
+        num_boost_round=10000,
     )
     return model
 
@@ -184,10 +109,10 @@ def objective(X, y, trial):
 
 def get_important_features(train_x: t.Any, test_x: t.Any, best_feature_count: int):
     pca = PCA(n_components=best_feature_count).fit(train_x)
-    train_x_pca = pca.transform(train_x)
-    test_x_pca = pca.transform(test_x)
+    train_x_pca = pd.DataFrame(pca.transform(train_x))
+    test_x_pca = pd.DataFrame(pca.transform(test_x))
+    print(train_x_pca, test_x_pca)
     return train_x_pca, test_x_pca
-
 
 
 def main():
@@ -195,10 +120,10 @@ def main():
     train_player = pd.read_csv(TRAIN_PLAYER_PATH)
     test_pitch = pd.read_csv(TEST_PITCH_PATH)
     test_player = pd.read_csv(TEST_PLAYER_PATH)
-    sub = pd.read_csv(SUBMISSION_PATH)
 
     train_pitch["use"] = "train"
-    test_pitch["use"] = "test" 
+    test_pitch["use"] = "test"
+    test_pitch["投球位置区域"] = 0
     pitch_data = pd.concat([train_pitch, test_pitch], axis=0).drop(PITCH_REMOVAL_COLUMNS, axis=1)
 
     player_data = pd.concat([train_player, test_player], axis=0).drop(PLAYER_REMOVAL_COLUMNS, axis=1) #.fillna(0)
@@ -206,11 +131,12 @@ def main():
 
     merged_data = pd.merge(
         pitch_data, 
-        pitchers_data, 
+        player_data, 
         how="left", 
-        left_on='投手ID', 
-        right_on='選手ID'
-    ).drop(['選手ID', '球種'], axis=1)
+        left_on=['年度','投手ID'], 
+        right_on=['年度','選手ID'],
+    ).drop(['選手ID', '球種'], axis=1).fillna(0)
+
 
     use = merged_data.loc[:, "use"]
     merged_data = merged_data.drop(["use", "位置", "年度"], axis=1)
@@ -262,7 +188,7 @@ def main():
     print(best_params) 
     print("#################################")
     
-    submission_df.to_csv(f"{DATA_DIR}/submission_pitching_course5   .csv", header=False)
+    submission_df.to_csv(f"{DATA_DIR}/submission_pitching_course5.csv", header=False)
 
 
 if __name__ == "__main__":
