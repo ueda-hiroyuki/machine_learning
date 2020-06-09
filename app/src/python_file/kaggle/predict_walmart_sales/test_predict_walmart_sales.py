@@ -20,6 +20,7 @@ CALENDAR_PATH = f'{DATA_DIR}/calendar.csv'
 PRICE_PATH = f'{DATA_DIR}/sell_prices.csv'
 SAMPLE_SUBMISSION_PATH = f'{DATA_DIR}/sample_submission.csv'
 
+# read_csvする際のdtypeを予め決定しておく
 CAL_DTYPES={
     "event_name_1": "category", 
     "event_name_2": "category", 
@@ -48,6 +49,7 @@ tr_last = 1913 # 学習データの最終日
 fday = datetime(2016,4, 25) 
 
 
+# 3つのdataframeをmergeしたものを返す
 def create_df(is_train=True, nrows=None, first_day=1200): 
     prices = cf.reduce_mem_usage(pd.read_csv(PRICE_PATH, dtype=PRICE_DTYPES))
     for col, col_dtype in PRICE_DTYPES.items():
@@ -67,23 +69,45 @@ def create_df(is_train=True, nrows=None, first_day=1200):
     dtype = {numcol: "float32" for numcol in numcols} # read_csv時の型指定(first_day~最終日まで)    
     dtype.update({catcol: "category" for catcol in catcols if catcol != "id"})
     dt = cf.reduce_mem_usage(pd.read_csv(TRAIN_PATH)) # nrowは上から○○行目までreadし, usecolsは指定したカラムのみreadする
-    print(dt)
     dt = cf.reduce_mem_usage(pd.read_csv(TRAIN_PATH, nrows=nrows, usecols=[*catcols, *numcols], dtype=dtype)) # nrowは上から○○行目までreadし, usecolsは指定したカラムのみreadする
-    print(dt)
     for catcol in catcols:
         if catcol != "id":
             dt[catcol] = dt[catcol].cat.codes.astype("int16") # カテゴリ変数をint型に変換 ⇒ 普通にcategory_encorderでもOK
             dt[catcol] -= dt[catcol].min()
     
     if not is_train:
-        for day in range(tr_last+1, tr_last+28+1) # test用の時は予測する部分のカラム(d_1914~d_1941)を追加し、nanで埋めておく。 
+        for day in range(tr_last+1, tr_last+28+1): # test用の時は予測する部分のカラム(d_1914~d_1941)を追加し、nanで埋めておく。 
+            dt[day] = np.nan 
+    
+    melted_dt = pd.melt(
+        dt,
+        id_vars=catcols, # 各日付の部分(カテゴリ変数以外の部分)を縦に並べていく
+        value_vars=[col for col in dt.columns if col.startswith("d_")],
+        var_name = "d",
+        value_name = "sales"
+    )
+    print(melted_dt)
 
-
+    merged_dt = pd.merge(
+        melted_dt,
+        calendar,
+        how="left", 
+        on="d"
+    )
+    print(merged_dt)
+    merged_dt = pd.merge(
+        merged_dt,
+        prices,
+        how="left", 
+        on=["store_id", "item_id", "wm_yr_wk"]
+    )
+    print(merged_dt)
+    return merged_dt
+ 
 
 def main() -> None:
     df = create_df(is_train=True, first_day=FIRST_DAY)
-
-    
+        
 
 if __name__ == "__main__":
     main()
