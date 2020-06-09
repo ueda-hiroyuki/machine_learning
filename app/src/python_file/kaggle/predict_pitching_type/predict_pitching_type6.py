@@ -170,20 +170,20 @@ PARAMS = {
         'est__max_depth': 10,
         'est__min_samples_split': 10,
         'est__min_samples_leaf': 10,
-        'est__n_estimators': 1000
+        'est__n_estimators': 100
     },
     'SVC':{
         "est__C": 0.1,
         'est__class_weight': 'balanced',
-        'est__max_iter':1000
+        'est__max_iter':100
     },
     'mlp':{
         "est__hidden_layer_sizes": (50,50,50,50),
         'est__early_stopping': True,
-        'est__max_iter':1000
+        'est__max_iter':100
     },
     'adb':{
-        'est__n_estimators': 1000,
+        'est__n_estimators': 100,
         'est__learning_rate': 0.1
     }
 }
@@ -253,8 +253,9 @@ def objective(X, y, trial):
 
 def get_important_features(train_x: t.Any, test_x: t.Any, best_feature_count: int):
     pca = PCA(n_components=best_feature_count).fit(train_x)
-    train_x_pca = pca.transform(train_x)
-    test_x_pca = pca.transform(test_x)
+    train_x_pca = pd.DataFrame(pca.transform(train_x))
+    test_x_pca = pd.DataFrame(pca.transform(test_x))
+    print(train_x_pca, test_x_pca)
     return train_x_pca, test_x_pca
 
 
@@ -310,7 +311,7 @@ def main():
     # study.optimize(f, n_trials=10) # 試行回数を決定する
     # print('params:', study.best_params)# 発見したパラメータを出力する
     # best_feature_count = study.best_params['n_components']
-    train_x_pca, test_x_pca = get_important_features(train_x, test_x, 200)  
+    train_x_pca, test_x_pca = get_important_features(train_x, test_x, 300)  
 
     # train_x_pca, test_x_pca = train_x, test_x
     
@@ -371,22 +372,6 @@ def main():
 
     submission.to_csv(f"{DATA_DIR}/my_submission21.csv", header=False)
     print(submission)
-
-
-
-        
-
-
-    
-    
-
-
-    
-
-
-
-
-
 
 
 if __name__ == "__main__":

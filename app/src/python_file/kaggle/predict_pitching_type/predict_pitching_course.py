@@ -211,13 +211,18 @@ def main():
         left_on='投手ID', 
         right_on='選手ID'
     ).drop(['選手ID', '球種'], axis=1)
+
     use = merged_data.loc[:, "use"]
-    merged_data = merged_data.drop(["use"], axis=1)
-    encorded_data = cf.label_encorder(merged_data)
+    merged_data = merged_data.drop(["use", "位置", "年度"], axis=1)
+
+    # category_encodersによってカテゴリ変数をencordingする
+    categorical_columns = [c for c in merged_data.columns if merged_data[c].dtype == 'object']
+    ce_oe = ce.OrdinalEncoder(cols=categorical_columns, handle_unknown='impute')
+    encorded_data = ce_oe.fit_transform(merged_data) 
     encorded_data = pd.concat([encorded_data, use], axis=1)
  
-    train = encorded_data[encorded_data["use"] == "train"].drop("use", axis=1)
-    test = encorded_data[encorded_data["use"] == "test"].drop("use", axis=1)
+    train = encorded_data[encorded_data["use"] == "train"].drop("use", axis=1).reset_index(drop=True)
+    test = encorded_data[encorded_data["use"] == "test"].drop("use", axis=1).reset_index(drop=True)
 
     train_x = train.drop("投球位置区域", axis=1)
     train_y = train.loc[:,"投球位置区域"].astype(int)
