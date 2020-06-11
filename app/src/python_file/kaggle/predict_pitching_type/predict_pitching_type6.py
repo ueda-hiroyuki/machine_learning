@@ -70,8 +70,8 @@ PIPELINES = {
     'rf': Pipeline([
         ('est',RandomForestClassifier(random_state=1, n_jobs=4))
     ]),
-    'gb': Pipeline([
-        ('est',GradientBoostingClassifier(random_state=1))
+    'lgbm': Pipeline([
+        ('est',lgb.LGBMClassifier(random_state=1, n_jobs=4))
     ]),
     'SVC': Pipeline([
         ('scl',StandardScaler()),
@@ -114,7 +114,7 @@ PIPELINES = {
 #         "est__criterion": ["gini"],
 #         'est__class_weight':['balanced']
 #     },
-#     'gb':{
+#     'lgbm':{
 #         'est__loss':['deviance'],
 #         'est__learning_rate':[0.01],
 #         'est__max_depth':[10],
@@ -164,26 +164,26 @@ PARAMS = {
         "est__criterion": "gini",
         'est__class_weight': 'balanced'
     },
-    'gb':{
-        'est__loss': 'deviance',
-        'est__learning_rate': 0.1,
+    'lgbm':{
+        'est__boosting_type': 'gbdt',
+        'est__num_leaves': 50,
         'est__max_depth': 10,
-        'est__min_samples_split': 10,
-        'est__min_samples_leaf': 10,
-        'est__n_estimators': 100
+        'est__learning_rate': 0.1,
+        'est__objective': 'multiclass',
+        'est__n_estimators': 1000
     },
     'SVC':{
         "est__C": 0.1,
         'est__class_weight': 'balanced',
-        'est__max_iter':100
+        'est__max_iter':1000
     },
     'mlp':{
         "est__hidden_layer_sizes": (50,50,50,50),
         'est__early_stopping': True,
-        'est__max_iter':100
+        'est__max_iter':1000
     },
     'adb':{
-        'est__n_estimators': 100,
+        'est__n_estimators': 1000,
         'est__learning_rate': 0.1
     }
 }

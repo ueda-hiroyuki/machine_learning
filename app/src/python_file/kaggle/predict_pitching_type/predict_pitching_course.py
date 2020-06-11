@@ -161,7 +161,7 @@ def main():
     study.optimize(f, n_trials=10) # 試行回数を決定する
     print('params:', study.best_params)# 発見したパラメータを出力する
     best_feature_count = study.best_params['n_components']
-    train_x_pca, test_x_pca = get_important_features(train_x, train_y, best_feature_count)  
+    train_x_pca, test_x_pca = get_important_features(train_x, test_x, best_feature_count)  
 
     n_splits = 10
     num_class = 13
