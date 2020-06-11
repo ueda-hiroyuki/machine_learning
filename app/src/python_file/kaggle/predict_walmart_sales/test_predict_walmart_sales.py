@@ -42,7 +42,7 @@ PRICE_DTYPES = {
     "sell_price":"float32" 
 }
 
-FIRST_DAY = 500
+FIRST_DAY = 1800
 h = 28 
 max_lags = 70
 tr_last = 1913 # 学習データの最終日
@@ -86,7 +86,6 @@ def create_df(is_train=True, nrows=None, first_day=1200):
         var_name = "d",
         value_name = "sales"
     )
-    print(melted_dt)
 
     merged_dt = pd.merge(
         melted_dt,
@@ -94,20 +93,84 @@ def create_df(is_train=True, nrows=None, first_day=1200):
         how="left", 
         on="d"
     )
-    print(merged_dt)
     merged_dt = pd.merge(
         merged_dt,
         prices,
         how="left", 
         on=["store_id", "item_id", "wm_yr_wk"]
     )
-    print(merged_dt)
     return merged_dt
- 
+
+
+def create_feature(df):
+    lags = [7, 28]
+    lag_cols = [f'lag_{lag}' for lag in lags]
+    print(df)
+    for lag, lag_col in zip(lags, lag_cols):
+        df[lag_col] = df[["id", "sales"]].groupby("id")["sales"].shift(lag) # idでグループ分けし、salesを7，28日ずつずらして過去のデータを特徴量として入れる
+    print(df)
+    wins = [7, 28]
+    for win in wins:
+        for lag, lag_col in zip(lags, lag_cols):
+            # ラグ変数追加後、各ラグ変数の(7，28日前)平均値を列として追加(7、28日分の平均(win))
+            df[f"rmean_{lag}_{win}"] = df[["id", lag_col]].groupby("id")[lag_col].transform(lambda x: x.rolling(win).mean())
+    print(df, df.columns)
+
+    date_features = {
+        "wday": "weekday",
+        "week": "weekofyear",
+        "month": "month",
+        "quarter": "quarter",
+        "year": "year",
+        "mday": "day",
+    }
+
+    # "date"の列(datetime型)から、月日などを取得し特徴量として加える。
+    for date_feat_name, date_feat_func in date_features.items():
+        if date_feat_name in df.columns:
+            df[date_feat_name] = df[date_feat_name].astype("int16") # 特徴量に既に存在する場合
+        else:
+            df[date_feat_name] = getattr(df["date"].dt, date_feat_func).astype("int16") # 存在していない場合
+    return df
 
 def main() -> None:
     df = create_df(is_train=True, first_day=FIRST_DAY)
-        
+    df = create_feature(df).dropna() # dropnaで28*(idのunique数)の行が削除される
+    print(df, df.columns)
+    categorical_cols = ['item_id', 'dept_id','store_id', 'cat_id', 'state_id'] + ["event_name_1", "event_name_2", "event_type_1", "event_type_2"]
+    useless_cols = ["id", "date", "sales","d", "wm_yr_wk", "weekday"]
+
+    train_x = df.drop(useless_cols, axis=1)
+    train_y = df.loc[:, "sales"]
+
+    train_data = lgb.Dataset(train_x, train_y, categorical_feature=categorical_cols, free_raw_data=False) # categorical_featureを指定することでエンコーディングをしてくれる(自分でlabel_encorderしてもよい)  
+    
+    # 学習データのサブサンプルを作成(学習データの中からランダムに抽出) ⇒ サブサンプルであり実際の検証用データではない
+    fake_valid_idx = np.random.choice(len(X_train), 1000000)
+    fake_valid_data = lgb.Dataset(train_x.iloc[fake_valid_idx], train_y.iloc[fake_valid_idx], categorical_feature=categorical_cols, free_raw_data=False)
+
+    # 学習時のパラメータ設定
+    params = {
+        "objective" : "poisson",
+        "metric" :"rmse",
+        "force_row_wise" : True,
+        "learning_rate" : 0.1,
+        "sub_row" : 0.75,
+        "bagging_freq" : 1,
+        "lambda_l2" : 0.1,
+        'verbosity': 1,
+        'num_iterations' : 2500,
+    }
+
+    model = lgb.train(
+        params, 
+        train_data, 
+        valid_sets=[fake_valid_data], 
+        verbose_eval=50,
+        early_stopping_rounds=10
+    )
+
+
 
 if __name__ == "__main__":
     main()
