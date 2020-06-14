@@ -47,139 +47,11 @@ TRAIN_PITCH_PATH = f"{DATA_DIR}/train_pitch.csv"
 TRAIN_PLAYER_PATH = f"{DATA_DIR}/train_player.csv"
 TEST_PITCH_PATH = f"{DATA_DIR}/test_pitch.csv"
 TEST_PLAYER_PATH = f"{DATA_DIR}/test_player.csv"
-SUBMISSION_PATH = f"{DATA_DIR}/sample_submit_ball_type.csv"
 
-PITCH_REMOVAL_COLUMNS = ["日付", "時刻", "試合内連番", "成績対象打者ID", "成績対象投手ID", "打者試合内打席数", "試合ID"]
+PITCH_REMOVAL_COLUMNS = ["データ内連番", "成績対象打者ID", "成績対象投手ID", "打者試合内打席数"]
 PLAYER_REMOVAL_COLUMNS = ["出身高校名", "出身大学名", "生年月日", "出身地", "出身国", "チームID", "社会人","ドラフト年","ドラフト種別","ドラフト順位", "年俸", "育成選手F"]
 
 NUM_CLASS = 8
-
-PIPELINES = {
-    'knn_1': Pipeline([
-        ('scl',StandardScaler()),
-        ('est',KNeighborsClassifier(n_jobs=-1))
-    ]),
-    'logistic_1': Pipeline([
-        ('scl',StandardScaler()),
-        ('est',LogisticRegression(n_jobs=-1, random_state=1))
-    ]),
-    'tree_1': Pipeline([
-        ('est',DecisionTreeClassifier(random_state=1))
-    ]),
-    'tree_2': Pipeline([
-        ('est',DecisionTreeClassifier(max_depth=5, random_state=1))
-    ]),
-    'tree_3': Pipeline([
-        ('est',DecisionTreeClassifier(max_depth=10, random_state=1))
-    ]),
-    'rf_1': Pipeline([
-        ('est',RandomForestClassifier(random_state=1, n_jobs=1))
-    ]),
-    'rf_2': Pipeline([
-        ('est',RandomForestClassifier(n_jobs=1, max_depth=10, min_samples_leaf=10, min_samples_split=10, n_estimators=500, random_state=1))
-    ]),
-    'rf_3': Pipeline([
-        ('est',RandomForestClassifier(n_jobs=1, class_weight='balanced', max_depth=10, min_samples_leaf=20, min_samples_split=20, n_estimators=1000, random_state=1))
-    ]),
-    'gb_1': Pipeline([
-        ('est',GradientBoostingClassifier(random_state=1))
-    ]),
-    'gb_2': Pipeline([
-        ('est',GradientBoostingClassifier(max_depth=8, random_state=1))
-    ]),
-    'gb_3': Pipeline([
-        ('est',GradientBoostingClassifier(learning_rate=0.2, random_state=1))
-    ]),
-    'SVC_1': Pipeline([
-        ('scl',StandardScaler()),
-        ('est',SVC(kernel="poly", class_weight='balanced', random_state=1, C=1, probability=True))
-    ]),
-    'SVC_2': Pipeline([
-        ('scl',StandardScaler()),
-        ('est',SVC(kernel="rbf", class_weight='balanced', random_state=1, C=1, probability=True))
-    ]),
-    'SVC_3': Pipeline([
-        ('scl',StandardScaler()),
-        ('est',SVC(kernel="sigmoid", class_weight='balanced', random_state=1, C=1, probability=True))
-    ]),
-    'SVC_4': Pipeline([
-        ('scl',StandardScaler()),
-        ('est',SVC(kernel="linear", C=0.2, class_weight='balanced', random_state=1, probability=True))
-    ]),
-    'mlp_1': Pipeline([
-        ('scl',StandardScaler()),
-        ('est',MLPClassifier(hidden_layer_sizes=(3,3),max_iter=500,random_state=1))
-    ]),
-    'mlp_2': Pipeline([
-        ('scl',StandardScaler()),
-        ('est',MLPClassifier(hidden_layer_sizes=(3,3),max_iter=500,random_state=1))
-    ]),
-    'adb_1': Pipeline([
-        ('est',AdaBoostClassifier(random_state=1))
-    ]),
-    'adb_2': Pipeline([('est',AdaBoostClassifier(n_estimators=500, random_state=1))]),
-    'adb_3': Pipeline([
-        ('est',AdaBoostClassifier(learning_rate=0.1, random_state=1))
-    ])
-}
-
-GRID_SEARCH_PARAMS = {
-    'knn':{
-        'est__n_neighbors':[2,3,4],
-        'est__weights':['uniform','distance'],
-        'est__algorithm':['auto'],
-        'est__leaf_size':[10,100],
-        'est__p':[1,2]
-    },
-    'logistic': {
-        "est__C":[0.1, 0.2, 0.5,  1],
-        "est__penalty":['l1', 'l2'],
-        'est__class_weight':['balanced'],
-        'est__max_iter':[1000, 2000]
-    },
-    'tree':{
-        'est__max_leaf_nodes': [10],
-        'est__min_samples_split': [5, 10],
-        'est__max_depth': [5, 10],
-        'est__criterion': ['gini', 'entropy'],
-        'est__class_weight':['balanced', None]
-    },
-    'rf':{
-        'est__min_samples_split':[5, 10],
-        'est__min_samples_leaf':[5, 10],
-        'est__max_depth': [5, 8],
-        "est__criterion": ["entropy"],
-        'est__class_weight':['balanced', None]
-    },
-    'gb':{
-        'est__loss':['deviance','exponential'],
-        'est__learning_rate':[ 0.01, 0.1],
-        'est__max_depth':[5, 10],
-        'est__min_samples_split':[0.1, 0.5],
-        'est__min_samples_leaf':[3, 5],
-    }
-}
-
-PIPELINES_GS = {
-    'knn': Pipeline([
-        ('scl',StandardScaler()),
-        ('est',KNeighborsClassifier(n_jobs=1))
-    ]),
-    'logistic': Pipeline([
-        ('scl',StandardScaler()),
-        ('est',LogisticRegression(n_jobs=1, random_state=1))
-    ]),
-    'tree': Pipeline([
-        ('est',DecisionTreeClassifier(random_state=1))
-    ]),
-    'rf': Pipeline([
-        ('est',RandomForestClassifier(random_state=1, n_jobs=1))
-    ]),
-    'gb': Pipeline([
-        ('est',GradientBoostingClassifier(random_state=1))
-    ]),
-}
-
 
 def get_best_params(train_x: t.Any, train_y: t.Any, num_class: int) -> t.Any:
     tr_x, val_x, tr_y, val_y = train_test_split(train_x, train_y, test_size=0.2, random_state=1)
@@ -266,7 +138,6 @@ def main():
     train_player = pd.read_csv(TRAIN_PLAYER_PATH)
     test_pitch = pd.read_csv(TEST_PITCH_PATH)
     test_player = pd.read_csv(TEST_PLAYER_PATH)
-    sub = pd.read_csv(SUBMISSION_PATH)
 
     train_pitch["use"] = "train"
     test_pitch["use"] = "test"
@@ -286,53 +157,35 @@ def main():
 
     use = merged_data.loc[:, "use"]
     labal = merged_data.loc[:, "球種"]
-    merged_data = merged_data.drop(["use", "位置", "年度", "球種"], axis=1)
+    merged_data = merged_data.drop(["use", "位置", "球種"], axis=1)
 
     categorical_columns = [c for c in merged_data.columns if merged_data[c].dtype == 'object']
-    ce_ohe = ce.OneHotEncoder(cols=categorical_columns, handle_unknown='impute') # one_hot_encording
-    encorded_data = ce_ohe.fit_transform(merged_data) 
+    ce_oe = ce.OrdinalEncoder(cols=categorical_columns, handle_unknown='impute') 
+    encorded_data = ce_oe.fit_transform(merged_data) 
     encorded_data = pd.concat([encorded_data, use, labal], axis=1)
+
+    encorded_data = encorded_data[encorded_data["試合ID"] == 2017033101] # 
+
+    lags = [1,2,3]
+    lag_cols = [f"lag_{lag}" for lag in lags]
+    for lag, lag_col in zip(lags, lag_cols):
+        encorded_data[lag_col] = 0
+
+
+    print(encorded_data.info())
+
+
  
-    train = encorded_data[encorded_data["use"] == "train"].drop("use", axis=1).reset_index(drop=True)
-    test = encorded_data[encorded_data["use"] == "test"].drop("use", axis=1).reset_index(drop=True)
+    # train = encorded_data[encorded_data["use"] == "train"].drop("use", axis=1).reset_index(drop=True)
+    # test = encorded_data[encorded_data["use"] == "test"].drop("use", axis=1).reset_index(drop=True)
 
-    train_x = train.drop("球種", axis=1)
-    train_y = train.loc[:,"球種"]
-    test_x = test.drop("球種", axis=1)
+    # train_x = train.drop("球種", axis=1)
+    # train_y = train.loc[:,"球種"]
+    # test_x = test.drop("球種", axis=1)
 
-    # selected_columns = get_selected_columns(train_x, train_y)
-    # selected_train_x = train_x.loc[:, selected_columns]
-    # selected_test_x = test_x.loc[:, selected_columns]
-    selected_train_x = train_x
-    selected_test_x = test_x
-
-    gridsearched_pipelines = {}
-    for pipeline_name, pipline in PIPELINES_GS.items():
-        print(f'GridsearchCV of {pipeline_name}')
-        params = GRID_SEARCH_PARAMS[pipeline_name]
-        gs = GridSearchCV(
-            estimator = pipline, 
-            param_grid = params, 
-        )
-        gs.fit(
-            selected_train_x,
-            train_y
-        )
-        print(gs.best_estimator_)
-        gridsearched_pipelines[pipeline_name] = gs.best_estimator_
-    
-    for pipe_name, pipeline in gridsearched_pipelines.items():
-        PIPELINES[pipe_name] = pipeline
-
-    for pipe_name, pipeline in PIPELINES.items():
-        pipeline.fit(selected_train_x, train_y)
-        print(pipe_name, ': Fitting Done')
+    # print(train_x.columns, train_x)
 
 
-
-
-
-   
 
 if __name__ == "__main__":
     main()
