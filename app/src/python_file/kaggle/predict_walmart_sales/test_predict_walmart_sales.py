@@ -1,4 +1,6 @@
 import gc
+import os
+import joblib
 import pandas as pd
 import numpy as np
 import lightgbm as lgb
@@ -6,6 +8,7 @@ import typing as t
 import seaborn as sns
 import dask.dataframe as dd
 import matplotlib.pyplot as plt
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor 
 from scipy import stats
 from sklearn.model_selection import train_test_split, KFold, GridSearchCV, RandomizedSearchCV
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, LabelEncoder
@@ -132,67 +135,70 @@ def create_feature(df):
     return df
 
 def main() -> None:
-    # df = create_df(is_train=True, first_day=FIRST_DAY)
-    # df = create_feature(df)
-    # print(df.info)
-    # categorical_cols = ['item_id', 'dept_id','store_id', 'cat_id', 'state_id'] + ["event_name_1", "event_name_2", "event_type_1", "event_type_2"]
-    # useless_cols = ["id", "date", "sales","d", "wm_yr_wk", "weekday"]
+    if not os.path.isfile(f"{DATA_DIR}/lgb_model.pkl"):
+        df = create_df(is_train=True, first_day=FIRST_DAY)
+        df = create_feature(df)
+        print(df.info)
+        categorical_cols = ['item_id', 'dept_id','store_id', 'cat_id', 'state_id'] + ["event_name_1", "event_name_2", "event_type_1", "event_type_2"]
+        useless_cols = ["id", "date", "sales","d", "wm_yr_wk", "weekday"]
 
-    # train_x = df.drop(useless_cols, axis=1)
-    # train_y = df.loc[:, "sales"]
-    # train_cols = train_x.columns
+        train_x = df.drop(useless_cols, axis=1)
+        train_y = df.loc[:, "sales"]
+        train_cols = train_x.columns
 
-    # train_data = lgb.Dataset(train_x, train_y, categorical_feature=categorical_cols, free_raw_data=False) # categorical_featureを指定することでエンコーディングをしてくれる(自分でlabel_encorderしてもよい)  
+        train_data = lgb.Dataset(train_x, train_y, categorical_feature=categorical_cols, free_raw_data=False) # categorical_featureを指定することでエンコーディングをしてくれる(自分でlabel_encorderしてもよい)  
+        
+        # 学習データのサブサンプルを作成(学習データの中からランダムに抽出) ⇒ サブサンプルであり実際の検証用データではない
+        fake_valid_idx = np.random.choice(len(train_x), 1000000)
+        fake_valid_data = lgb.Dataset(train_x.iloc[fake_valid_idx], train_y.iloc[fake_valid_idx], categorical_feature=categorical_cols, free_raw_data=False)
+
+        # 学習時のパラメータ設定
+        params = {
+            "num_threads": 2,
+            "objective" : "poisson",
+            "metric" :"rmse",
+            "force_row_wise" : True,
+            "learning_rate" : 0.1,
+            "sub_row" : 0.75,
+            "bagging_freq" : 1,
+            "lambda_l2" : 0.1,
+            'verbosity': 1,
+            'num_iterations' : 2500,
+        }
+
+        model = lgb.train(
+            params, 
+            train_data, 
+            valid_sets=[fake_valid_data], 
+            verbose_eval=50,
+            early_stopping_rounds=10,
+        )
+        joblib.dump(model, f"{DATA_DIR}/lgb_model.pkl")
     
-    # # 学習データのサブサンプルを作成(学習データの中からランダムに抽出) ⇒ サブサンプルであり実際の検証用データではない
-    # fake_valid_idx = np.random.choice(len(train_x), 1000000)
-    # fake_valid_data = lgb.Dataset(train_x.iloc[fake_valid_idx], train_y.iloc[fake_valid_idx], categorical_feature=categorical_cols, free_raw_data=False)
+    model = joblib.load(f"{DATA_DIR}/lgb_model.pkl")
 
-    # # 学習時のパラメータ設定
-    # params = {
-    #     "objective" : "poisson",
-    #     "metric" :"rmse",
-    #     "force_row_wise" : True,
-    #     "learning_rate" : 0.1,
-    #     "sub_row" : 0.75,
-    #     "bagging_freq" : 1,
-    #     "lambda_l2" : 0.1,
-    #     'verbosity': 1,
-    #     'num_iterations' : 2500,
-    # }
-
-    # model = lgb.train(
-    #     params, 
-    #     train_data, 
-    #     valid_sets=[fake_valid_data], 
-    #     verbose_eval=50,
-    #     early_stopping_rounds=10
-    # )
-
-    alphas = [1.035, 1.03, 1.025, 1.02]
-    weights = [1/len(alphas)]*len(alphas)
+    alphas = [1.028, 1.023, 1.018]
+    weights = [1/len(alphas)]*len(alphas) # [0.33333333, 0.33333333, 0.333333333]
     sub = 0.
+    print(weights)
 
     for icount, (weight, alpha) in enumerate(zip(weights, alphas)):
-        te = create_df(False) # テストデータにはd_1914~1942までのカラムが追加されている。
-        print(te)
-        pred_cols = [f"F{i}" for i in range(1,29)]
+        te = create_df(False) # テストデータにはd_1914~1942までのカラムが追加されている(中身はすべてNan)。
+        cols = [f"F{i}" for i in range(1,29)]
+
         for tdelta in range(0,28):
             day = fday + timedelta(days=tdelta)
-            tst = te[(te.date >= day - timedelta(days=max_lags)) & (te.date <= day)].copy()
-            print("###############################")
-            print(tst)
-            tst = create_feature(tst)
-            tst = tst.loc[tst.date == day, train_cols]
-            te.loc[te.date == day, "sales"] == alpha * model.predict(tst)
-        
-        te_sub = te.loc[te.date >= fday, ["id", "sales"]].copy()
-        te_sub["F"] = [f"F{rank}" for rank in te_sub.groupby("id")["id"].cumcount()+1]
-
-
-
+            tst = te[
+                (te.date >= day - timedelta(days=max_lags)) & 
+                (te.date <= day)
+            ].copy()
+            _df = create_feature(tst)
+            tst = tst.loc[tst.date == day , train_cols]
+            te.loc[te.date == day, "sales"] = alpha * model.predict(tst) # magic multiplier by kyakovlev
 
 
 
 if __name__ == "__main__":
-    main()
+    with ProcessPoolExecutor(max_workers=2) as executer:
+        executer.submit(main()) # CPU4つ使っている。
+    
