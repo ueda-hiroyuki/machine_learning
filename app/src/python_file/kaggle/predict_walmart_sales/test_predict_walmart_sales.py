@@ -180,11 +180,11 @@ def main() -> None:
     alphas = [1.028, 1.023, 1.018]
     weights = [1/len(alphas)]*len(alphas) # [0.33333333, 0.33333333, 0.333333333]
     sub = 0.
-    print(weights)
-
+    
     for icount, (weight, alpha) in enumerate(zip(weights, alphas)):
         te = create_df(False) # テストデータにはd_1914~1942までのカラムが追加されている(中身はすべてNan)。
         cols = [f"F{i}" for i in range(1,29)]
+        print(te)
 
         for tdelta in range(0,28):
             day = fday + timedelta(days=tdelta)
@@ -192,6 +192,7 @@ def main() -> None:
                 (te.date >= day - timedelta(days=max_lags)) & 
                 (te.date <= day)
             ].copy()
+            print(tst)
             _df = create_feature(tst)
             tst = tst.loc[tst.date == day , train_cols]
             te.loc[te.date == day, "sales"] = alpha * model.predict(tst) # magic multiplier by kyakovlev
