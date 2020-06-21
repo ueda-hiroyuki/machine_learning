@@ -34,6 +34,9 @@ FIXED_COLS = [
     "state_id"
 ]
 
+"""
+d_1914~d_1941までの28日間の各アイテムの売り上げを予測する
+"""
 
 def main():
     sales = pd.read_csv(TRAIN_EVALUATION_PATH)
@@ -42,59 +45,128 @@ def main():
     calendar.name = 'calendar'
     prices = pd.read_csv(PRICE_PATH)
     prices.name = 'prices'
-    melted_sales = pd.melt( # wide ⇒ long フォーマット変換
-        sales,
-        id_vars = FIXED_COLS,
-        var_name="d", 
-        value_name='sales', 
-    )
-    merged_dataset = pd.merge(
-        melted_sales,
-        calendar,
-        how="left",
-        on=["d"]
-    )
-    merged_dataset = pd.merge(
-        merged_dataset,
-        prices,
-        how="left",
-        on=["store_id", "item_id", "wm_yr_wk"]
-    ) # 3つのdataframeを結合
-    merged_dataset["revenue"] = merged_dataset["sell_price"] * merged_dataset["sales"] 
+    sample_submission = pd.read_csv(SAMPLE_SUBMISSION_PATH)
+    sample_submission.name = 'submission'
+    ids = sample_submission["id"]
+    if not os.path.isfile(f"{DATA_DIR}/dataset.pkl"):
+        for col in [f"d_{i}" for i in range(1942, 1970)]:
+            sales[col] = 0
+            sales[col] = sales[col].astype(np.int16)
 
-    print(merged_dataset.loc[:, [*FIXED_COLS, "sell_price"]])
-    group_price_store = merged_dataset.groupby(['state_id','store_id','item_id'],as_index=False)['sell_price'].mean().dropna() # 各item_idの平均の売り上げ
+        melted_sales = pd.melt( # wide ⇒ long フォーマット変換
+            sales,
+            id_vars = FIXED_COLS,
+            var_name="d", 
+            value_name='sales', 
+        )
+        merged_dataset = pd.merge(
+            melted_sales,
+            calendar,
+            how="left",
+            on=["d"]
+        )
+        merged_dataset = pd.merge(
+            merged_dataset,
+            prices,
+            how="left",
+            on=["store_id", "item_id", "wm_yr_wk"]
+        ) # 3つのdataframeを結合
+        merged_dataset["revenue"] = merged_dataset["sell_price"] * merged_dataset["sales"] # 総売上の特徴量を追加
+        group_price_store = merged_dataset.groupby(['state_id','store_id','item_id'],as_index=False)['sell_price'].mean().dropna() # 各item_idの平均の売り上げ
 
-    # category_encodersによってカテゴリ変数をencordingする
-    categorical_columns = [c for c in merged_dataset.columns if merged_dataset[c].dtype == 'object']
-    ce_oe = ce.OrdinalEncoder(cols=categorical_columns, handle_unknown='impute')
-    encorded_data = ce_oe.fit_transform(merged_dataset) 
+        # category_encodersによってカテゴリ変数をencordingする
+        categorical_columns = [c for c in merged_dataset.columns if merged_dataset[c].dtype == 'object']
+        ce_oe = ce.OrdinalEncoder(cols=categorical_columns, handle_unknown='impute')
+        encorded_data = ce_oe.fit_transform(merged_dataset) 
 
-    print(encorded_data)
+        # ラグ変数を特徴量として加える。
+        lags = [1,2,3,6,12,24,36]
+        for lag in lags:
+            # lagsで指定した日数分前の傾向データを加える
+            encorded_data[f"sales_lag_{lag}"] = encorded_data.groupby(FIXED_COLS)["sales"].shift(lag).astype(np.float16)
 
-    # ラグ変数を特徴量として加える。
-    lags = [1,2,3,6,12,24,36]
-    for lag in lags:
-        # lagsで指定した日数分前の傾向データを加える
-        encorded_data[f"sales_lag_{lag}"] = encorded_data.groupby(FIXED_COLS)["sales"].shift(lag).astype(np.float16)
+        # target encoding (transform: groupbyしても行は圧縮されない) ⇒ 目的変数からカテゴリ変数を数値変換する手法
+        encorded_data['iteam_sales_avg'] = encorded_data.groupby('item_id')['sales'].transform('mean').astype(np.float16) # 各item_idの平均売り上げ数
+        encorded_data['state_sales_avg'] = encorded_data.groupby('state_id')['sales'].transform('mean').astype(np.float16) # 各state_idの平均売り上げ数
+        encorded_data['store_sales_avg'] = encorded_data.groupby('store_id')['sales'].transform('mean').astype(np.float16) # 各store_idの平均売り上げ数
+        encorded_data['cat_sales_avg'] = encorded_data.groupby('cat_id')['sales'].transform('mean').astype(np.float16) # 各cat_idの平均売り上げ数
+        encorded_data['dept_sales_avg'] = encorded_data.groupby('dept_id')['sales'].transform('mean').astype(np.float16) # 各dept_idの平均売り上げ数
+        encorded_data['cat_dept_sales_avg'] = encorded_data.groupby(['cat_id','dept_id'])['sales'].transform('mean').astype(np.float16)
+        encorded_data['store_item_sales_avg'] = encorded_data.groupby(['store_id','item_id'])['sales'].transform('mean').astype(np.float16)
+        encorded_data['cat_item_sales_avg'] = encorded_data.groupby(['cat_id','item_id'])['sales'].transform('mean').astype(np.float16)
+        encorded_data['dept_item_sales_avg'] = encorded_data.groupby(['dept_id','item_id'])['sales'].transform('mean').astype(np.float16)
+        encorded_data['state_store_sales_avg'] = encorded_data.groupby(['state_id','store_id'])['sales'].transform('mean').astype(np.float16)
+        encorded_data['state_store_cat_sales_avg'] = encorded_data.groupby(['state_id','store_id','cat_id'])['sales'].transform('mean').astype(np.float16)
+        encorded_data['store_cat_dept_sales_avg'] = encorded_data.groupby(['store_id','cat_id','dept_id'])['sales'].transform('mean').astype(np.float16)
 
-    # target mean encoding (transform: groupbyしても行は圧縮されない)
-    encorded_data['iteam_sales_avg'] = encorded_data.groupby('item_id')['sales'].transform('mean').astype(np.float16)
-    encorded_data['state_sales_avg'] = encorded_data.groupby('state_id')['sales'].transform('mean').astype(np.float16)
-    encorded_data['store_sales_avg'] = encorded_data.groupby('store_id')['sales'].transform('mean').astype(np.float16)
-    encorded_data['cat_sales_avg'] = encorded_data.groupby('cat_id')['sales'].transform('mean').astype(np.float16)
-    encorded_data['dept_sales_avg'] = encorded_data.groupby('dept_id')['sales'].transform('mean').astype(np.float16)
-    encorded_data['cat_dept_sales_avg'] = encorded_data.groupby(['cat_id','dept_id'])['sales'].transform('mean').astype(np.float16)
-    encorded_data['store_item_sales_avg'] = encorded_data.groupby(['store_id','item_id'])['sales'].transform('mean').astype(np.float16)
-    encorded_data['cat_item_sales_avg'] = encorded_data.groupby(['cat_id','item_id'])['sales'].transform('mean').astype(np.float16)
-    encorded_data['dept_item_sales_avg'] = encorded_data.groupby(['dept_id','item_id'])['sales'].transform('mean').astype(np.float16)
-    encorded_data['state_store_sales_avg'] = encorded_data.groupby(['state_id','store_id'])['sales'].transform('mean').astype(np.float16)
-    encorded_data['state_store_cat_sales_avg'] = encorded_data.groupby(['state_id','store_id','cat_id'])['sales'].transform('mean').astype(np.float16)
-    encorded_data['store_cat_dept_sales_avg'] = encorded_data.groupby(['store_id','cat_id','dept_id'])['sales'].transform('mean').astype(np.float16)
+        encorded_data["rolling_sales_mean"] = encorded_data.groupby(FIXED_COLS)["sales"].transform(lambda x: x.rolling(window=7).mean()).astype(np.float16) # グループの直近7日間の売り上げ平均を特徴量として加える。
+        encorded_data['expanding_sold_mean'] = encorded_data.groupby(FIXED_COLS)['sales'].transform(lambda x: x.expanding(2).mean()).astype(np.float16) # グループの累積平均を特徴量として加える。
 
+        encorded_data = encorded_data[encorded_data["d"] >= 36] # ラグ変数のカラムは36日以前までのデータがNaNになっている為、その部分は切り落とす
+        joblib.dump(encorded_data, f"{DATA_DIR}/dataset.pkl", compress=3)
+    
+    dataset = joblib.load(f"{DATA_DIR}/dataset.pkl")
+    # d_36 ~ d_1970 のうち1914~1941の28日間を評価用データ、1942~1970の28日間を検証用データに設定する
+    valid = dataset[(dataset["d"] >= 1914) & (dataset["d"] < 1942)] 
+    test = dataset[(dataset["d"] >= 1942)]
+    valid_preds = valid.loc[:, "sales"]
+    eval_preds = test.loc[:, "sales"]
+
+    stores = list(dataset["store_id"].unique())
+    for store in stores:
+        _df = dataset[dataset["store_id"] == store]
+        train_x = _df[_df["d"] < 1914].drop("sales", axis=1)
+        train_y = _df[_df["d"] < 1914].loc[:, "sales"]
+        valid_x = _df[(_df["d"] >= 1914) & (_df["d"] < 1942)].drop("sales", axis=1)
+        valid_y = _df[(_df["d"] >= 1914) & (_df["d"] < 1942)].loc[:, "sales"]
+        test_x = _df[_df["d"] >= 1942].drop("sales", axis=1)
+
+        if not os.path.isfile(f"{DATA_DIR}/lgb_model_{store}.pkl"):
+            lgb_model = lgb.LGBMRegressor(
+                n_estimators=1000,
+                learning_rate=0.3,
+                subsample=0.8,
+                colsample_bytree=0.8,
+                max_depth=8,
+                num_leaves=50,
+                min_child_weight=300,
+                n_jobs=4
+            )
+            print(f"START FIT to store_id: {store} !!")
+            lgb_model.fit(
+                train_x,
+                train_y,
+                eval_set=[(train_x, train_y),(valid_x, valid_y)], # 学習データ(自身)と評価用データに対して評価を行う
+                eval_metric='rmse', 
+                verbose=20, 
+                early_stopping_rounds=20
+            )
+            joblib.dump(lgb_model, f"{DATA_DIR}/lgb_model_{store}.pkl")
+        else:
+            lgb_model = joblib.load(f"{DATA_DIR}/lgb_model_{store}.pkl")
+        valid_preds[valid_x.index] = lgb_model.predict(valid_x) # 選択されたstore_id、日にちのindex部分に予測結果を当てはめていく。
+        eval_preds[test_x.index] = lgb_model.predict(test_x)
+
+    valid["sales"] = valid_preds
+    validation = valid.loc[:, ["id", "d", "sales"]]
+    validation = validation.pivot(index='id', columns='d', values='sales').reset_index(drop=True)
+    print(validation)
+    validation.columns = [f"F{i}" for i in range(1, 29)]
+
+    test["sales"] = eval_preds
+    evalution = test.loc[:, ["id", "d", "sales"]]
+    evalution = evalution.pivot(index='id', columns='d', values='sales').reset_index(drop=True)
+    print(evalution)
+    evalution.columns = [f"F{i}" for i in range(1, 29)]
+
+    submission = pd.concat([validation, evalution], axis=0)
+    submission = pd.concat([ids, submission], axis=1).round()
+    print(submission)
+
+    submission.to_csv(f"{DATA_DIR}/submission_1.csv")
 
 
 if __name__ == "__main__":
-    with ProcessPoolExecutor(max_workers=2) as executer:
+    with ProcessPoolExecutor(max_workers=4) as executer:
         executer.submit(main()) # CPU2つ使っている。
     
