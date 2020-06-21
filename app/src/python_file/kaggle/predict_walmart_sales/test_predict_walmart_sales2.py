@@ -47,7 +47,7 @@ def main():
     prices.name = 'prices'
     sample_submission = pd.read_csv(SAMPLE_SUBMISSION_PATH)
     sample_submission.name = 'submission'
-    ids = sample_submission["id"]
+    ids = sample_submission.loc[:,"id"]
     if not os.path.isfile(f"{DATA_DIR}/dataset.pkl"):
         for col in [f"d_{i}" for i in range(1942, 1970)]:
             sales[col] = 0
@@ -106,9 +106,9 @@ def main():
         joblib.dump(encorded_data, f"{DATA_DIR}/dataset.pkl", compress=3)
     
     dataset = joblib.load(f"{DATA_DIR}/dataset.pkl")
-    # d_36 ~ d_1970 のうち1914~1941の28日間を評価用データ、1942~1970の28日間を検証用データに設定する
-    valid = dataset[(dataset["d"] >= 1914) & (dataset["d"] < 1942)] 
-    test = dataset[(dataset["d"] >= 1942)]
+    # d_36 ~ d_1970 のうち1914~1941の28日間を評価用データ(validation)、1942~1969の28日間を検証用データ(evaluation)に設定する
+    valid = dataset[(dataset["d"] >= 1914) & (dataset["d"] < 1942)].loc[:, ["id", "d", "sales"]]
+    test = dataset[(dataset["d"] >= 1942)].loc[:, ["id", "d", "sales"]]
     valid_preds = valid.loc[:, "sales"]
     eval_preds = test.loc[:, "sales"]
 
@@ -150,20 +150,19 @@ def main():
     valid["sales"] = valid_preds
     validation = valid.loc[:, ["id", "d", "sales"]]
     validation = validation.pivot(index='id', columns='d', values='sales').reset_index(drop=True)
-    print(validation)
     validation.columns = [f"F{i}" for i in range(1, 29)]
 
     test["sales"] = eval_preds
     evalution = test.loc[:, ["id", "d", "sales"]]
     evalution = evalution.pivot(index='id', columns='d', values='sales').reset_index(drop=True)
-    print(evalution)
     evalution.columns = [f"F{i}" for i in range(1, 29)]
+    
 
-    submission = pd.concat([validation, evalution], axis=0)
-    submission = pd.concat([ids, submission], axis=1).round()
+    submission = pd.concat([validation, evalution], axis=0).reset_index(drop=True)
+    submission = pd.concat([ids, submission], axis=1)
     print(submission)
 
-    submission.to_csv(f"{DATA_DIR}/submission_1.csv")
+    submission.to_csv(f"{DATA_DIR}/submission_2.csv", index=False)
 
 
 if __name__ == "__main__":
