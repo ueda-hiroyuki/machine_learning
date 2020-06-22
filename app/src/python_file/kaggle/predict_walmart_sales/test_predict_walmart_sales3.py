@@ -82,8 +82,7 @@ def main():
     prices.name = 'prices'
     sample_submission = pd.read_csv(SAMPLE_SUBMISSION_PATH)
     sample_submission.name = 'submission'
-    mask = sample_submission.loc[:,"id"].str.endswith('_evaluation')
-    ids = sample_submission[mask].loc[:,"id"].reset_index(drop=True)
+    ids = sample_submission.loc[:,"id"]
     if not os.path.isfile(f"{DATA_DIR}/dataset.pkl"):
         for col in [f"d_{i}" for i in range(1942, 1970)]:
             sales[col] = 0
@@ -180,7 +179,8 @@ def main():
     evalution = evalution.pivot(index='id', columns='d', values='sales').reset_index(drop=True)
     evalution.columns = [f"F{i}" for i in range(1, 29)]
     
-    submission = pd.concat([ids, evalution], axis=1)
+    submission = pd.concat([validation, evaluation], axis=0)
+    submission = pd.concat([ids, submission], axis=1)
     print(submission)
 
     submission.to_csv(f"{DATA_DIR}/submission_3.csv", index=False)
