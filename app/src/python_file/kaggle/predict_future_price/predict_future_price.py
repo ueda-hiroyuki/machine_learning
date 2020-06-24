@@ -1,9 +1,14 @@
+import re
+import time
 import matplotlib.pyplot as plt
 import pandas as pd
 import typing as t
 import numpy as np
 import lightgbm as lgb
+import category_encoders as ce
+from sklearn.preprocessing import LabelEncoder
 from datetime import datetime
+from itertools import product
 
 DATA_DIR = "src/sample_data/Kaggle/predict_future_price"
 SALES_TRAIN_PATH = f"{DATA_DIR}/sales_train.csv"
@@ -13,8 +18,78 @@ PRED_PRICE_PATH = f"{DATA_DIR}/pred_price.csv"
 SHOPS_PATH = f"{DATA_DIR}/shops.csv"
 TEST_PATH = f"{DATA_DIR}/test.csv"
 
+def name_correction(x):
+    x = x.lower()
+    x = x.partition('[')[0]
+    x = x.partition('(')[0]
+    x = re.sub('[^A-Za-z0-9А-Яа-я]+', ' ', x)
+    x = x.replace('  ', ' ')
+    x = x.strip()
+    return x
 
-def preprocessing(train, items, item_categories, pred_price, shops, test):
+def preprocessing_shops(shops):
+    # shopsの前処理
+    shops.loc[ shops.shop_name == 'Сергиев Посад ТЦ "7Я"',"shop_name" ] = 'СергиевПосад ТЦ "7Я"'
+    shops["city"] = shops.shop_name.str.split(" ").map( lambda x: x[0] )
+    shops["category"] = shops.shop_name.str.split(" ").map( lambda x: x[1] )
+    shops.loc[shops.city == "!Якутск", "city"] = "Якутск"
+    category = [] # 登場回数の少ないカテゴリは"etc"とする
+    for cat in shops.category.unique():
+        if len(shops[shops.category == cat]) > 4:
+            category.append(cat)
+    shops.category = shops.category.apply( lambda x: x if (x in category) else "etc" ) # 母数の多いカテゴリはそのまま、それ以外を「etc(その他)」としている。
+    shops["category"] = LabelEncoder().fit_transform(shops.category) # categoryとcityのカテゴリ変数をencording
+    shops["city"] = LabelEncoder().fit_transform(shops.city)
+    shops = shops.drop("shop_name", axis=1)
+    return shops
+
+def preprocessing_item_category(item_categories):
+    # item_categoryの前処理
+    item_categories["type_code"] = item_categories.item_category_name.apply(lambda x: x.split()[0]).astype(str) # 文字列の" "で区切られている部分の先頭の文字列を取得する。
+    item_categories.loc[(item_categories.type_code == "Игровые") | (item_categories.type_code == "Аксессуары"), "category"] = "Игры"
+    category = [] # 登場回数の少ないカテゴリは"etc"とする
+    for cat in item_categories.type_code.unique():
+        if len(item_categories[item_categories.type_code == cat]) > 4:
+            category.append(cat)
+    item_categories.type_code = item_categories.type_code.apply(lambda x: x if (x in category) else "etc")
+    item_categories["type_code"] = LabelEncoder().fit_transform(item_categories.type_code)
+    item_categories["split"] = item_categories.item_category_name.apply(lambda x: x.split("-"))
+    item_categories["subtype"] = item_categories.split.apply(lambda x: x[1].strip() if len(x) > 1 else x[0].strip())
+    item_categories["subtype_code"] = LabelEncoder().fit_transform(item_categories.subtype)
+    item_categories = item_categories.loc[:, ["item_category_id", "type_code", "subtype_code"]]
+    return item_categories
+
+def preprocessing_items(items):
+    # itemsの前処理
+    items["name1"], items["name2"] = items.item_name.str.split("[", 1).str
+    items["name1"], items["name3"] = items.item_name.str.split("(", 1).str
+    items["name2"] = items.name2.str.replace('[^A-Za-z0-9А-Яа-я]+', " ").str.lower()
+    items["name3"] = items.name3.str.replace('[^A-Za-z0-9А-Яа-я]+', " ").str.lower()
+    items = items.fillna('0')
+    items["item_name"] = items["item_name"].apply(lambda x: name_correction(x))
+    items.name2 = items.name2.apply( lambda x: x[:-1] if x !="0" else "0")
+    items["type"] = items.name2.apply(lambda x: x[0:8] if x.split(" ")[0] == "xbox" else x.split(" ")[0] )
+    items.loc[(items.type == "x360") | (items.type == "xbox360") | (items.type == "xbox 360") ,"type"] = "xbox 360"
+    items.loc[ items.type == "", "type"] = "mac"
+    items.type = items.type.apply( lambda x: x.replace(" ", "") )
+    items.loc[ (items.type == 'pc' )| (items.type == 'pс') | (items.type == "pc"), "type" ] = "pc"
+    items.loc[ items.type == 'рs3' , "type"] = "ps3"
+    remove_cols = []
+    for name, value in items["type"].value_counts().items():
+        if value < 40:
+            remove_cols.append(name) 
+        else:
+            pass
+    items.name2 = items.name2.apply(lambda x: "etc" if (x in remove_cols) else x)
+    items = items.drop(["type"], axis = 1)
+    items.name2 = LabelEncoder().fit_transform(items.name2)
+    items.name3 = LabelEncoder().fit_transform(items.name3)
+    items.drop(["item_name", "name1"],axis = 1, inplace= True)
+    return items
+
+
+
+def preprocessing_train_test(train, test):
     train = train[train.item_price > 0].reset_index(drop = True)
     train.loc[train.item_cnt_day < 1, "item_cnt_day"] = 0
 
@@ -26,12 +101,8 @@ def preprocessing(train, items, item_categories, pred_price, shops, test):
     test.loc[test.shop_id == 11, "shop_id"] = 10
     train.loc[train.shop_id == 40, "shop_id"] = 39
     test.loc[test.shop_id == 40, "shop_id"] = 39
-    shops.loc[ shops.shop_name == 'Сергиев Посад ТЦ "7Я"',"shop_name" ] = 'СергиевПосад ТЦ "7Я"'
-    shops["city"] = shops.shop_name.str.split(" ").map( lambda x: x[0] )
-    shops["category"] = shops.shop_name.str.split(" ").map( lambda x: x[1] )
-    shops.loc[shops.city == "!Якутск", "city"] = "Якутск"
 
-    return train, items, item_categories, pred_price, shops, test
+    return train, test
 
 
 def main():
@@ -42,14 +113,21 @@ def main():
     shops = pd.read_csv(SHOPS_PATH)
     test = pd.read_csv(TEST_PATH)
 
-    train, items, item_categories, pred_price, shops, test = preprocessing(train, items, item_categories, pred_price, shops, test)
-    category = []
-    for cat in shops.category.unique():
-        print(cat, len(shops[shops.category == cat]) )
-        if len(shops[shops.category == cat]) > 4:
-            category.append(cat)
-    shops.category = shops.category.apply( lambda x: x if (x in category) else "etc" ) # 母数の多いカテゴリはそのまま、それ以外を「etc(その他)」としている。
-    print(shops)
+    train, test = preprocessing_train_test(train, test)
+    shops = preprocessing_shops(shops)
+    item_categories = preprocessing_item_category(item_categories)
+    items = preprocessing_items(items)
+
+    matrix = []
+    cols  = ["date_block_num", "shop_id", "item_id"]
+    for i in range(34): # date_block_num(1月分)が0~33まで存在する。
+        sales = train[train["date_block_num"] == i] # 1月毎の売り上げを抽出
+        sales_matrix = np.array(list(product([i], sales.shop_id.unique(), sales.item_id.unique())), dtype = np.int16) # 月、item_id、shop_idの組み合わせ(直積)を算出
+        matrix.append(sales_matrix)
+    matrix = pd.DataFrame(np.vstack(matrix), columns=cols).sort_values(cols)
+    print(matrix)
+
+    
 
 
 if __name__ == "__main__":
