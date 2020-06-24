@@ -179,11 +179,12 @@ def main():
     evalution = evalution.pivot(index='id', columns='d', values='sales').reset_index(drop=True)
     evalution.columns = [f"F{i}" for i in range(1, 29)]
     
-    submission = pd.concat([validation, evaluation], axis=0)
+    submission = pd.concat([validation, evalution], axis=0).reset_index(drop=True)
+    submission = submission.where(submission>0, 0)
     submission = pd.concat([ids, submission], axis=1)
     print(submission)
 
-    submission.to_csv(f"{DATA_DIR}/submission_3.csv", index=False)
+    submission.to_csv(f"{DATA_DIR}/submission_4.csv", index=False)
 
 
 if __name__ == "__main__":
