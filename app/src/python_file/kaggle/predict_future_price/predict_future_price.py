@@ -101,8 +101,34 @@ def preprocessing_train_test(train, test):
     test.loc[test.shop_id == 11, "shop_id"] = 10
     train.loc[train.shop_id == 40, "shop_id"] = 39
     test.loc[test.shop_id == 40, "shop_id"] = 39
+    train["revenue"] = train["item_cnt_day"] * train["item_price"]
+    test["date_block_num"] = 34 # 0~33までを学習データとし用い、34(ひと月分)の売り上げを予測する
+    test = test.apply(lambda x: x.astype(np.int16))
 
     return train, test
+
+
+def gen_lag_feature(matrix, lags, cols):
+    pre_cols = ["shop_id", "item_id"]
+    for col in cols:
+        _df = matrix.loc[:, [*pre_cols, col]]
+        print(_df)
+        for lag in lags:
+            matrix[f"lag_{lag}"] = _df.groupby(pre_cols)[col].shift(lag)
+    return matrix
+
+# def gen_lag_feature(df, lags, cols):
+#     for col in cols:
+#         tmp = df[["date_block_num", "shop_id","item_id",col ]]
+#         for i in lags:
+#             shifted = tmp.copy()
+#             shifted.columns = ["date_block_num", "shop_id", "item_id", col + "_lag_"+str(i)]
+#             shifted.date_block_num = shifted.date_block_num + i
+#             print(shifted)
+#             df = pd.merge(df, shifted, on=['date_block_num','shop_id','item_id'], how='left')
+#     print(df.isna().sum())
+#     return df
+
 
 
 def main():
@@ -124,10 +150,44 @@ def main():
         sales = train[train["date_block_num"] == i] # 1月毎の売り上げを抽出
         sales_matrix = np.array(list(product([i], sales.shop_id.unique(), sales.item_id.unique())), dtype = np.int16) # 月、item_id、shop_idの組み合わせ(直積)を算出
         matrix.append(sales_matrix)
-    matrix = pd.DataFrame(np.vstack(matrix), columns=cols).sort_values(cols)
-    print(matrix)
+    matrix = pd.DataFrame(np.vstack(matrix), columns=cols).sort_values(cols) # 月、item_id、shop_idの組み合わせをdataframeにしたもの
+    matrix = matrix.apply(lambda x: x.astype(np.int16))
 
-    
+    group = train.groupby(["date_block_num", "shop_id", "item_id"]).agg({"item_cnt_day": ["sum"]}) # ["date_block_num", "shop_id", "item_id"]の組み合わせごとの総売り上げ数
+    group.columns = ["item_cnt_month"]
+    group = group.reset_index()
+    merged_matrix = pd.merge(matrix, group, how="left", on=cols)
+    merged_matrix["item_cnt_month"] = merged_matrix["item_cnt_month"].fillna(0).clip(0, 20) # その月で売り上げのなかったitemは0で置換し、最小値を0、最大値を20として外れ値を除去
+
+    submit_ids = test.loc[:, "ID"]
+    merged_matrix = pd.concat([merged_matrix, test.drop("ID", axis=1)], axis=0).fillna(0).reset_index(drop=True)
+
+    # 与えられたデータフレームのマージ
+    merged_items = pd.merge(
+        items,
+        item_categories,
+        on="item_category_id",
+        how="left"
+    )
+    merged_matrix = pd.merge(
+        merged_matrix,
+        merged_items,
+        on="item_id",
+        how="left"
+    )
+    merged_matrix = pd.merge(
+        merged_matrix,
+        shops,
+        on="shop_id",
+        how="left"
+    )
+    merged_matrix = merged_matrix.apply(lambda x: x.astype(np.int16))
+    merged_matrix = gen_lag_feature(merged_matrix, [1,2,3], ["item_cnt_month"]) # 1,2,3か月前の"item_cnt_month"を特徴量に追加
+
+    group = matrmerged_matrixix.groupby( ["date_block_num"] ).agg({"item_cnt_month" : ["mean"]})
+    group.columns = ["date_avg_item_cnt"]
+    group.reset_index(inplace = True)
+    print(group)
 
 
 if __name__ == "__main__":
