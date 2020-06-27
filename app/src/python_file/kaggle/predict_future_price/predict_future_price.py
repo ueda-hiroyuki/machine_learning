@@ -184,10 +184,12 @@ def main():
     merged_matrix = merged_matrix.apply(lambda x: x.astype(np.int16))
     merged_matrix = gen_lag_feature(merged_matrix, [1,2,3], ["item_cnt_month"]) # 1,2,3か月前の"item_cnt_month"を特徴量に追加
 
-    group = matrmerged_matrixix.groupby( ["date_block_num"] ).agg({"item_cnt_month" : ["mean"]})
+    group = merged_matrix.groupby( ["date_block_num"] ).agg({"item_cnt_month" : ["mean"]}) # 各月における全アイテムの売り上げ平均数
     group.columns = ["date_avg_item_cnt"]
     group.reset_index(inplace = True)
-    print(group)
+    
+    aa = merged_matrix[merged_matrix["date_block_num"] == 0]
+    print(aa["item_cnt_month"].mean())
 
 
 if __name__ == "__main__":
