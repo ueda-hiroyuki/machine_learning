@@ -1,5 +1,7 @@
 import re
+import os
 import time
+import joblib
 import matplotlib.pyplot as plt
 import pandas as pd
 import typing as t
@@ -112,22 +114,29 @@ def gen_lag_feature(matrix, lags, cols):
     pre_cols = ["shop_id", "item_id"]
     for col in cols:
         _df = matrix.loc[:, [*pre_cols, col]]
-        print(_df)
         for lag in lags:
-            matrix[f"lag_{lag}"] = _df.groupby(pre_cols)[col].shift(lag)
+            matrix[f"{col}_lag_{lag}"] = _df.groupby(pre_cols)[col].shift(lag)
     return matrix
 
-# def gen_lag_feature(df, lags, cols):
-#     for col in cols:
-#         tmp = df[["date_block_num", "shop_id","item_id",col ]]
-#         for i in lags:
-#             shifted = tmp.copy()
-#             shifted.columns = ["date_block_num", "shop_id", "item_id", col + "_lag_"+str(i)]
-#             shifted.date_block_num = shifted.date_block_num + i
-#             print(shifted)
-#             df = pd.merge(df, shifted, on=['date_block_num','shop_id','item_id'], how='left')
-#     print(df.isna().sum())
-#     return df
+
+def get_model(train_dataset: t.Any, valid_dataset: t.Any) -> t.Any:
+    params = {
+        "objective": "regression",
+        "boosting_type": "gbdt",
+        'metric' : {'rmse'},
+        'num_leaves' : 200,
+        'min_data_in_leaf': 1000,
+        'num_iterations' : 10000,
+        'learning_rate' : 0.1,
+        'feature_fraction' : 0.8,
+    }
+    model = lgb.train(
+        params=params,
+        train_set=train_dataset,
+        valid_sets=valid_dataset,
+        early_stopping_rounds=10,
+    )
+    return model
 
 
 
@@ -184,12 +193,65 @@ def main():
     merged_matrix = merged_matrix.apply(lambda x: x.astype(np.int16))
     merged_matrix = gen_lag_feature(merged_matrix, [1,2,3], ["item_cnt_month"]) # 1,2,3か月前の"item_cnt_month"を特徴量に追加
 
-    group = merged_matrix.groupby( ["date_block_num"] ).agg({"item_cnt_month" : ["mean"]}) # 各月における全アイテムの売り上げ平均数
-    group.columns = ["date_avg_item_cnt"]
+    # 各月における全アイテムの売り上げ平均数を特徴量に追加
+    group = merged_matrix.groupby("date_block_num").agg({"item_cnt_month" : "mean"}) 
+    group.columns = ["date_avg_item_cnt"] 
+    group.reset_index(inplace = True) # col:  date_block_num, date_avg_item_cnt とする
+    merged_matrix = pd.merge(merged_matrix, group, how="left", on="date_block_num")
+    merged_matrix.date_avg_item_cnt = merged_matrix["date_avg_item_cnt"].astype(np.float16)
+    merged_matrix = gen_lag_feature(merged_matrix, [1], ["date_avg_item_cnt"]) # 1か月前の"date_avg_item_cnt"を特徴量に追加
+
+    # 各月における、アイテム毎の売り上げ平均数を特徴量に追加
+    group = merged_matrix.groupby(["date_block_num", "item_id"]).agg({"item_cnt_month" : "mean"}) 
+    group.columns = ["date_item_avg_item_cnt"] 
+    group.reset_index(inplace = True) # col:  date_block_num, item_id, date_item_avg_item_cnt とする
+    merged_matrix = pd.merge(merged_matrix, group, how="left", on=["date_block_num", "item_id"])
+    merged_matrix.date_avg_item_cnt = merged_matrix["date_item_avg_item_cnt"].astype(np.float16)
+    merged_matrix = gen_lag_feature(merged_matrix, [1,2,3], ["date_item_avg_item_cnt"])
+
+    # 各月におけるアイテムごとの平均価格を特徴量として追加
+    group = train.groupby(["date_block_num", "item_id"]).agg({"item_price": "mean"})
+    group.columns = ["date_item_avg_item_price"]
     group.reset_index(inplace = True)
+    merged_matrix = pd.merge(merged_matrix, group, how="left", on=["date_block_num", "item_id"])
+    merged_matrix.date_item_avg_item_price = merged_matrix["date_item_avg_item_price"].astype(np.float16)
+    merged_matrix = gen_lag_feature(merged_matrix, [1,2,3], ["date_item_avg_item_price"])
+
+    # 月と日付の特徴量も追加
+    merged_matrix["month"] = merged_matrix["date_block_num"] % 12
+    days = pd.Series([31,28,31,30,31,30,31,31,30,31,30,31])
+    merged_matrix["days"] = merged_matrix["month"].map(days).astype(np.int16)
+
+    dataset = merged_matrix[merged_matrix["date_block_num"] > 3] # lag情報付与により3月分はNanになっている為除去
+
+    # date_block_num が1~32 のものを学習に、33のものを評価用に、34のものを検証用に用いる
+    train_x = dataset[dataset.date_block_num < 33].drop(['item_cnt_month'], axis=1).reset_index(drop=True)
+    train_y = dataset[dataset.date_block_num < 33]['item_cnt_month'].reset_index(drop=True)
+    valid_x = dataset[dataset.date_block_num == 33].drop(['item_cnt_month'], axis=1).reset_index(drop=True)
+    valid_y = dataset[dataset.date_block_num == 33]['item_cnt_month'].reset_index(drop=True)
+    test_x = dataset[dataset.date_block_num == 34].drop(['item_cnt_month'], axis=1).reset_index(drop=True)
+
+    train_dataset = lgb.Dataset(train_x, train_y)
+    valid_dataset = lgb.Dataset(valid_x, valid_y, reference=train_dataset)
+
+    if not os.path.isfile(f"{DATA_DIR}/lgb_model.pkl"):
+        model = get_model(train_dataset, valid_dataset)
+        joblib.dump(model, f"{DATA_DIR}/lgb_model.pkl")
+    else:
+        model = joblib.load(f"{DATA_DIR}/lgb_model.pkl")
     
-    aa = merged_matrix[merged_matrix["date_block_num"] == 0]
-    print(aa["item_cnt_month"].mean())
+    ids = test_x.index
+    y_pred = model.predict(test_x).clip(0, 20) # test_x に対して予測し、予測値の範囲を(0,20)に設定
+    print(y_pred)
+    submission = pd.DataFrame(
+        {
+            "ID": range(len(test_x)),
+            "item_cnt_month": y_pred
+        }
+    )
+    print(submission)
+    submission.to_csv(f"{DATA_DIR}/submission_1.csv", index=False)
+
 
 
 if __name__ == "__main__":
