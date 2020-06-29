@@ -18,7 +18,7 @@ from python_file.kaggle.common import common_funcs as cf
 
 
 DATA_DIR = "src/sample_data/Kaggle/predict_walmart_sales"
-TRAIN_PATH = f'{DATA_DIR}/sales_train_validation.csv'
+TRAIN_PATH = f'{DATA_DIR}/sales_train_evaluation.csv'
 CALENDAR_PATH = f'{DATA_DIR}/calendar.csv'
 PRICE_PATH = f'{DATA_DIR}/sell_prices.csv'
 SAMPLE_SUBMISSION_PATH = f'{DATA_DIR}/sample_submission.csv'
@@ -45,11 +45,11 @@ PRICE_DTYPES = {
     "sell_price":"float32" 
 }
 
-FIRST_DAY = 1800
+FIRST_DAY = 200
 h = 28 
-max_lags = 70
-tr_last = 1913 # 学習データの最終日
-fday = datetime(2016,4, 25) # 予測を始める1日目(d_1914)
+max_lags = 57
+tr_last = 1913 + 28 # 学習データの最終日(evaluation file 解禁)
+fday = datetime(2016,4, 25) + timedelta(days=28)# 予測を始める1日目(evaluation file 解禁によりd_1941~)
 
 
 # 3つのdataframeをmergeしたものを返す
@@ -71,7 +71,6 @@ def create_df(is_train=True, nrows=None, first_day=1200):
     catcols = ['id', 'item_id', 'dept_id','store_id', 'cat_id', 'state_id'] #  カテゴリ変数のカラム名
     dtype = {numcol: "float32" for numcol in numcols} # read_csv時の型指定(first_day~最終日まで)    
     dtype.update({catcol: "category" for catcol in catcols if catcol != "id"})
-    dt = cf.reduce_mem_usage(pd.read_csv(TRAIN_PATH)) # nrowは上から○○行目までreadし, usecolsは指定したカラムのみreadする
     dt = cf.reduce_mem_usage(pd.read_csv(TRAIN_PATH, nrows=nrows, usecols=[*catcols, *numcols], dtype=dtype)) # nrowは上から○○行目までreadし, usecolsは指定したカラムのみreadする
     for catcol in catcols:
         if catcol != "id":
@@ -138,7 +137,6 @@ def main() -> None:
     if not os.path.isfile(f"{DATA_DIR}/lgb_model.pkl"):
         df = create_df(is_train=True, first_day=FIRST_DAY)
         df = create_feature(df)
-        print(df.info)
         categorical_cols = ['item_id', 'dept_id','store_id', 'cat_id', 'state_id'] + ["event_name_1", "event_name_2", "event_type_1", "event_type_2"]
         useless_cols = ["id", "date", "sales","d", "wm_yr_wk", "weekday"]
 
@@ -177,12 +175,12 @@ def main() -> None:
     
     model = joblib.load(f"{DATA_DIR}/lgb_model.pkl")
 
-    alphas = [1.028, 1.023, 1.018]
+    alphas = [1.023, 1.018, 1.013]
     weights = [1/len(alphas)]*len(alphas) # [0.33333333, 0.33333333, 0.333333333]
     sub = 0.
     
     for icount, (weight, alpha) in enumerate(zip(weights, alphas)):
-        te = create_df(False) # テストデータにはd_1914~1942までのカラムが追加されている(中身はすべてNan)。
+        te = create_df(False) # テストデータにはd_1943~1970までのカラムが追加されている(中身はすべてNan)。
         cols = [f"F{i}" for i in range(1,29)]
         print(te)
 
@@ -197,6 +195,19 @@ def main() -> None:
             tst = tst.loc[tst.date == day , train_cols]
             te.loc[te.date == day, "sales"] = alpha * model.predict(tst) # magic multiplier by kyakovlev
 
+        te_sub = te.loc[te.date >= fday, ["id", "sales"]].copy()
+        te_sub["F"] = [f"F{rank}" for rank in te_sub.groupby("id")["id"].cumcount()+1]
+        te_sub = te_sub.set_index(["id", "F" ]).unstack()["sales"][cols].reset_index()
+        te_sub.fillna(0., inplace = True)
+        te_sub.sort_values("id", inplace = True)
+        te_sub.reset_index(drop=True, inplace = True)
+        te_sub.to_csv(f"submission_{icount}.csv",index=False)
+        if icount == 0 :
+            sub = te_sub
+            sub[cols] *= weight
+        else:
+            sub[cols] += te_sub[cols]*weight
+        # これでevaluationの部分は完成
 
 
 if __name__ == "__main__":
