@@ -54,10 +54,11 @@ def check_fig(df: pd.DataFrame, f_name: str) -> pd.DataFrame:
 
 
 def check_hist(df: pd.DataFrame, f_name: str):
-    df.hist(figsize=(30,30)); # 一括でヒストグラムを描画する
-    plt.tight_layout() # グラフ同士が重ならないようにする関数
-    plt.savefig(f'src/sample_data/Kaggle/{f_name}/histgrams.png')
-
+    for col_name, item in df.iteritems():
+        plt.figure()
+        df[col_name].value_counts().plot(kind="bar")
+        plt.savefig(f'src/sample_data/Kaggle/{f_name}/{col_name}_hist.png')
+        
 
 def label_encorder(df: pd.DataFrame) -> pd.DataFrame:
     for col_name, col in df.iteritems():
