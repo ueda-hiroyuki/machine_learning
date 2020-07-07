@@ -13,6 +13,7 @@ from optuna.integration import lightgbm_tuner #LightGBM用Stepwise Tuningに必�
 from sklearn.impute import SimpleImputer 
 from sklearn.decomposition import PCA
 from functools import partial
+from sklearn.manifold import TSNE
 from python_file.kaggle.common import common_funcs as cf
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor 
 from sklearn.feature_selection import RFE
@@ -47,7 +48,21 @@ PLAYER_REMOVAL_COLUMNS = ["出身高校名", "出身大学名", "生年月日", 
 
 NUM_CLASS = 8
 
+def ckeck_tsne(df: pd.DataFrame) -> None:
+    labels = df.loc[:, "球種"]
+    df = df.drop("球種", axis=1)
+    df_reduced = TSNE(n_components=2, random_state=0).fit_transform(df)
+    df_reduced = pd.concat([df_reduced, labels], axis=1)
+    plt.figure()
+    for t in list(labels.unique()):
+        _df = df_reduced[df_reduced["球種"] == t]
+        plt.scatter(_df[:, 0], _df[:, 1], label=t)
+    plt.legend()
+    plt.savefig(f'{DATA_DIR}/tsne_map.png')
+            
 
+
+# optunaによるハイパラの最適化
 def get_tuned_model(train_set, valid_set, num_class) -> t.Any:
     best_params = {}
     params = {
@@ -69,18 +84,8 @@ def get_tuned_model(train_set, valid_set, num_class) -> t.Any:
         best_params=best_params,
         tuning_history=tuning_history
     )
+    joblib.dump(gbm, f"{DATA_DIR}/lgb_model.pkl")
     return gbm
-
-def get_model(train_set, valid_set, params) -> t.Any:
-    evals_result = {}
-    model = lgb.train(
-        params=params,
-        train_set=train_set,
-        valid_sets=valid_set,
-        early_stopping_rounds=20,
-        num_boost_round=10000,
-    )
-    return model
 
 
 def main():
@@ -118,30 +123,34 @@ def main():
     encorded = ce_oe.fit_transform(merged) 
     encorded = pd.concat([encorded, usage, labal], axis=1)
 
-    train = encorded[encorded["use"] == "train"].drop("use", axis=1).reset_index(drop=True)
-    test = encorded[encorded["use"] == "test"].drop("use", axis=1).reset_index(drop=True)
+    print(encorded.columns)
+    ckeck_tsne(encorded.drop("use", axis=1))
 
-    train_x = train.drop("球種", axis=1)
-    train_y = train.loc[:,"球種"]
-    test_x = test.drop("球種", axis=1)
+    # train = encorded[encorded["use"] == "train"].drop("use", axis=1).reset_index(drop=True)
+    # test = encorded[encorded["use"] == "test"].drop("use", axis=1).reset_index(drop=True)
 
-    if not os.path.isfile(f"{DATA_DIR}/lgb_model.pkl"):
-        # 学習用データセット
-        train_set = lgb.Dataset(train_x, train_y)
-        # 学習用データセットの中から評価用に適当な量だけ使用
-        fake_valid_idx = np.random.choice(len(train_x), round(len(train_x)*0.2))
-        fake_valid_set = lgb.Dataset(train_x.iloc[fake_valid_idx], train_y.iloc[fake_valid_idx])
+    # train_x = train.drop("球種", axis=1)
+    # train_y = train.loc[:,"球種"]
+    # test_x = test.drop("球種", axis=1)
 
-        # optunaでチューニング後のモデルを取得
-        gbm = get_tuned_model(train_set, fake_valid_set, NUM_CLASS)
-        joblib.dump(gbm, f"{DATA_DIR}/lgb_model.pkl")
 
-    else:
-        gbm = joblib.load(f"{DATA_DIR}/lgb_model.pkl") 
 
-    y_pred = gbm.predict(test_x)
+    # if not os.path.isfile(f"{DATA_DIR}/lgb_model.pkl"):
+    #     # 学習用データセット
+    #     train_set = lgb.Dataset(train_x, train_y)
+    #     # 学習用データセットの中から評価用に適当な量だけ使用
+    #     fake_valid_idx = np.random.choice(len(train_x), round(len(train_x)*0.2))
+    #     fake_valid_set = lgb.Dataset(train_x.iloc[fake_valid_idx], train_y.iloc[fake_valid_idx])
 
-    print(y_pred)
+    #     # optunaでチューニング後のモデルを取得
+    #     gbm = get_tuned_model(train_set, fake_valid_set, NUM_CLASS)
+
+    # else:
+    #     gbm = joblib.load(f"{DATA_DIR}/lgb_model.pkl") 
+
+    # y_pred = gbm.predict(test_x)
+
+    # print(y_pred)
 
 
 
