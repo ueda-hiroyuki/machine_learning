@@ -70,7 +70,7 @@ def get_tuned_model(train_set, valid_set, num_class) -> t.Any:
         'metric': 'multi_logloss',
         'boosting_type': 'gbdt', 
         'num_class': num_class,
-        'num_threads': 1
+        'num_threads': 2
     }
     best_params = {}
     tuning_history = []
@@ -123,34 +123,29 @@ def main():
     encorded = ce_oe.fit_transform(merged) 
     encorded = pd.concat([encorded, usage, labal], axis=1)
 
-    print(encorded.columns)
-    ckeck_tsne(encorded.drop("use", axis=1))
+    train = encorded[encorded["use"] == "train"].drop("use", axis=1).reset_index(drop=True)
+    test = encorded[encorded["use"] == "test"].drop("use", axis=1).reset_index(drop=True)
 
-    # train = encorded[encorded["use"] == "train"].drop("use", axis=1).reset_index(drop=True)
-    # test = encorded[encorded["use"] == "test"].drop("use", axis=1).reset_index(drop=True)
+    train_x = train.drop("球種", axis=1)
+    train_y = train.loc[:,"球種"]
+    test_x = test.drop("球種", axis=1)
 
-    # train_x = train.drop("球種", axis=1)
-    # train_y = train.loc[:,"球種"]
-    # test_x = test.drop("球種", axis=1)
+    if not os.path.isfile(f"{DATA_DIR}/lgb_model.pkl"):
+        # 学習用データセット
+        train_set = lgb.Dataset(train_x, train_y)
+        # 学習用データセットの中から評価用に適当な量だけ使用
+        fake_valid_idx = np.random.choice(len(train_x), round(len(train_x)*0.2))
+        fake_valid_set = lgb.Dataset(train_x.iloc[fake_valid_idx], train_y.iloc[fake_valid_idx])
 
+        # optunaでチューニング後のモデルを取得
+        gbm = get_tuned_model(train_set, fake_valid_set, NUM_CLASS)
 
+    else:
+        gbm = joblib.load(f"{DATA_DIR}/lgb_model.pkl") 
 
-    # if not os.path.isfile(f"{DATA_DIR}/lgb_model.pkl"):
-    #     # 学習用データセット
-    #     train_set = lgb.Dataset(train_x, train_y)
-    #     # 学習用データセットの中から評価用に適当な量だけ使用
-    #     fake_valid_idx = np.random.choice(len(train_x), round(len(train_x)*0.2))
-    #     fake_valid_set = lgb.Dataset(train_x.iloc[fake_valid_idx], train_y.iloc[fake_valid_idx])
+    y_pred = gbm.predict(test_x)
 
-    #     # optunaでチューニング後のモデルを取得
-    #     gbm = get_tuned_model(train_set, fake_valid_set, NUM_CLASS)
-
-    # else:
-    #     gbm = joblib.load(f"{DATA_DIR}/lgb_model.pkl") 
-
-    # y_pred = gbm.predict(test_x)
-
-    # print(y_pred)
+    print(y_pred)
 
 
 
