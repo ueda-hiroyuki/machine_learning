@@ -13,14 +13,17 @@ from optuna.integration import lightgbm_tuner #LightGBM用Stepwise Tuningに必�
 from sklearn.impute import SimpleImputer 
 from sklearn.decomposition import PCA
 from functools import partial
+from sklearn.pipeline import Pipeline
 from sklearn.manifold import TSNE
 from python_file.kaggle.common import common_funcs as cf
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor 
 from sklearn.feature_selection import RFE
-from sklearn.model_selection import train_test_split, KFold, StratifiedKFold
+from sklearn.model_selection import train_test_split, KFold, StratifiedKFold, TimeSeriesSplit, GridSearchCV
 from sklearn.preprocessing import StandardScaler, LabelEncoder, OneHotEncoder
 from sklearn.metrics import mean_squared_error, r2_score, accuracy_score, roc_auc_score, precision_recall_curve, auc, f1_score
-
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.svm import SVC
 
 """
 train_pitch(51 columns)
@@ -49,6 +52,58 @@ PLAYER_REMOVAL_COLUMNS = ["出身高校名", "出身大学名", "生年月日", 
 NUM_CLASS = 8
 
 
+PIPELINES = {
+    'knn': Pipeline([
+        ('scl',StandardScaler()),
+        ('est',KNeighborsClassifier())
+    ]),
+    'logistic': Pipeline([
+        ('scl',StandardScaler()),
+        ('est',LogisticRegression(random_state=1))
+    ]),
+    'gbm': Pipeline([
+        (
+            'est',
+            lgb.LGBMClassifier(
+                objective="multiclass",
+                boosting_type= 'gbdt', 
+                n_jobs = 4,
+            )
+        )
+    ]),
+    'SVC': Pipeline([
+        ('scl',StandardScaler()),
+        ('est',SVC(random_state=1))
+    ]),
+}
+
+GRID_SEARCH_PARAMS = {
+    'knn':{
+        'est__n_neighbors':[2,3,4],
+        'est__weights':['uniform','distance'],
+        'est__algorithm':['auto'],
+        'est__leaf_size':[10,100],
+        'est__p':[1,2]
+    },
+    'logistic': {
+        "est__C":[0.1, 0.2, 0.5,  1],
+        "est__penalty":['l1', 'l2'],
+        'est__class_weight':['balanced'],
+        'est__max_iter':[1000, 2000]
+    },
+    'gbm':{
+        'est__num_leaves':[30, 50],
+        'est__learning_rate':[0.01, 0.1],
+        'est__max_depth':[5, 10],
+        'est__n_estimators':[1000, 2000],
+    },
+    'SVC':{
+        "est__C":[0.1, 0.5,  1],
+        'est__class_weight':['balanced'],
+        'est__max_iter':[1000, 2000]
+    },
+}
+
 def ckeck_tsne(df: pd.DataFrame) -> None:
     labels = df.loc[:, "球種"]
     df = df.drop("球種", axis=1)
@@ -65,23 +120,22 @@ def ckeck_tsne(df: pd.DataFrame) -> None:
 def preprocessing(df):
     df['走者'] = np.where(df["プレイ前走者状況"] == "___", 0, 1) # プレイ前ランナーがいるかいないか。
     df['BMI'] = (df["体重"]/(df["身長"]/100)**2) # 身長体重をBMIに変換
-    df = df.drop(["体重", "身長"], axis=1)
+    df.drop(["体重", "身長"], axis=1)
     return df
 
 
 def add_lag(df, lags=[1,2,3]):
     for lag in lags:
-        df[f"lag_per_match_{lag}"] = df.groupby(["年度", "試合ID", "投手ID"])["球種"].shift(lag)
-        df[f"lag_per_inning_{lag}"] = df.groupby(["年度", "試合ID", "イニング", "表裏", "投手ID"])["球種"].shift(lag)
-        df[f"lag_per_bat_{lag}"] = df.groupby(["年度", "試合ID", "投手チームID", "イニング", "表裏", "イニング内打席数", "投手ID"])["球種"].shift(lag)
+        df[f"lag_per_match_{lag}"] = df.groupby(["年度", "試合ID", "投手チームID", "投手ID"])["球種"].shift(lag)
+        df[f"lag_per_inning_{lag}"] = df.groupby(["年度", "試合ID", "投手チームID", "イニング", "投手ID"])["球種"].shift(lag)
+        df[f"lag_per_bat_{lag}"] = df.groupby(["年度", "試合ID", "投手チームID", "イニング", "イニング内打席数", "投手ID"])["球種"].shift(lag)
     return df
 
 def add_trend(df, lags=[1,2,3]):
-    df["mean_per_match"] = df.groupby(["年度", "試合ID", "投手ID"])["球種"].transform('mean')
-    df["mean_per_inning"] = df.groupby(["年度", "試合ID", "イニング", "表裏", "投手ID"])["球種"].transform('mean')
-    df["mean_per_bat"] = df.groupby(["年度", "試合ID", "イニング", "表裏", "イニング内打席数", "投手ID"])["球種"].transform('mean')
-    print(df.groupby(["年度", "試合ID", "投手ID"])["球種"].value_counts())
-    
+    df["mean_per_match"] = df.groupby(["年度", "試合ID", "投手チームID", "投手ID"])["球種"].transform('mean')
+    df["mean_per_inning"] = df.groupby(["年度", "試合ID", "投手チームID", "イニング", "投手ID"])["球種"].transform('mean')
+    df["mean_per_bat"] = df.groupby(["年度", "試合ID", "投手チームID", "イニング", "イニング内打席数", "投手ID"])["球種"].transform('mean')
+
     return df
 
 
@@ -95,35 +149,6 @@ def get_important_features(train_x: t.Any, train_y: t.Any, best_feature_count: i
     selector.fit(train_x, train_y) # 学習データを渡す
     selected_train_x = pd.DataFrame(selector.transform(train_x), columns=train_x.columns[selector.support_])
     return selected_train_x, train_y
-
-
-def get_model(train_x, train_y, valid_x, valid_y, num_class) -> t.Any:
-    # 学習用データセット
-    train_set = lgb.Dataset(train_x, train_y)
-    # 評価用データセット
-    valid_set = lgb.Dataset(valid_x, valid_y)
-    lgb_params = {
-        'objective': 'multiclass',
-        'metric': 'multi_logloss',
-        'boosting_type': 'gbdt', 
-        'num_class': num_class,
-        'num_threads': 2,
-        'num_leaves' : 30,
-        'min_data_in_leaf': 20,
-        'num_iterations' : 100,
-        'learning_rate' : 0.1,
-        'feature_fraction' : 0.8,
-    }
-    model = lgb.train(
-        params=lgb_params,
-        train_set=train_set,
-        valid_sets=[train_set, valid_set],
-        early_stopping_rounds=20,
-        num_boost_round=1000
-    )
-    importance = pd.DataFrame(model.feature_importance(), index=train_x.columns, columns=['importance']).sort_values('importance', ascending=[False])
-    print(importance.head(20))
-    return model
 
 
 # optunaによるハイパラの最適化
@@ -201,9 +226,9 @@ def main():
 
     lags = [1,2,3] # ラグ特徴量の追加
     encorded = add_trend(encorded)
-    # encorded = add_lag(encorded, lags)
+    encorded = add_lag(encorded, lags)
 
-    encorded = encorded.fillna(encorded.mean())
+    encorded = encorded.fillna(encorded.mean()) # 決定木系以外はNanがあると学習できないため、各列の平均値でNanを置換
 
     train = encorded[(encorded["use"] == "train") & (encorded["日付"] < "2017-9-1")].drop(["use","日付"], axis=1).reset_index(drop=True)
     valid = encorded[(encorded["use"] == "train") & (encorded["日付"] >= "2017-9-1")].drop(["use","日付"], axis=1).reset_index(drop=True)
@@ -215,22 +240,22 @@ def main():
     valid_y = valid.loc[:,"球種"]
     test_x = test.drop("球種", axis=1)
 
-    print(train_x, train_y, valid_x, valid_y)
-
-    if not os.path.isfile(f"{DATA_DIR}/lgb_model.pkl"):
-        # optunaでチューニング後のモデルを取得
-        gbm = get_model(train_x, train_y, valid_x, valid_y, NUM_CLASS)
-
+    if not os.path.isfile(f"{DATA_DIR}/best_estimetors.pkl"):
+        best_estimetors = {}
+        model_names = [c for c in PIPELINES]
+        tscv = TimeSeriesSplit(n_splits=3)
+        for (param_name, param), (pipeline_name, pipeline) in zip(GRID_SEARCH_PARAMS.items(), PIPELINES.items()):
+            logging.info(f'{param_name} GRID SEARCH STARTED !!')
+            gscv = GridSearchCV(pipeline, param, cv=tscv, refit=True)
+            gscv.fit(train_x, train_y)
+            best_estimetor = gscv.best_estimator_
+            best_estimetors[pipeline_name] = best_estimetor
+        joblib.dump(best_estimetors, f"{DATA_DIR}/best_estimetors.pkl")
     else:
-        gbm = joblib.load(f"{DATA_DIR}/lgb_model.pkl") 
-
-    y_pred = gbm.predict(test_x)
-    submission = pd.DataFrame(y_pred)
-    print("#################################")
-    print(submission)
-    print("#################################")
+        best_estimetors = joblib.load(f"{DATA_DIR}/best_estimetors.pkl")
     
-    submission.to_csv(f"{DATA_DIR}/my_submission23.csv", header=False)
+    print(best_estimetors)
+    meta_model = LogisticRegression() # meta_modelは線形モデル
 
 
     
