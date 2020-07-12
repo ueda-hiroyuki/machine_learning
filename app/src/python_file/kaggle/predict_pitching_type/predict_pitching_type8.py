@@ -200,7 +200,7 @@ def main():
     encorded = pd.concat([encorded, date, usage, labal], axis=1)
 
     lags = [1,2,3] # ラグ特徴量の追加
-    encorded = add_trend(encorded)
+    # encorded = add_trend(encorded)
     # encorded = add_lag(encorded, lags)
 
     encorded = encorded.fillna(encorded.mean())
