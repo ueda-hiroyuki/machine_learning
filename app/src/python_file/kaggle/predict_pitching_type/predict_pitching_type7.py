@@ -58,6 +58,13 @@ PLAYER_REMOVAL_COLUMNS = ["出身高校名", "出身大学名", "生年月日", 
 NUM_CLASS = 8
 
 
+def preprocessing(df):
+    df['走者'] = np.where(df["プレイ前走者状況"] == "___", 0, 1) # プレイ前ランナーがいるかいないか。
+    df['BMI'] = (df["体重"]/(df["身長"]/100)**2) # 身長体重をBMIに変換
+    df = df.drop(["体重", "身長"], axis=1)
+    return df
+
+
 def get_best_params(train_x: t.Any, train_y: t.Any, num_class: int) -> t.Any:
     tr_x, val_x, tr_y, val_y = train_test_split(train_x, train_y, test_size=0.2, random_state=1)
     lgb_train = lgb.Dataset(tr_x, tr_y)
@@ -108,7 +115,7 @@ def get_model(train_x, train_y, valid_x, valid_y, num_class) -> t.Any:
         num_boost_round=1000
     )
     importance = pd.DataFrame(model.feature_importance(), index=train_x.columns, columns=['importance']).sort_values('importance', ascending=[False])
-    print(importance.head(20))
+    print(importance.head(50))
     return model
 
 
@@ -133,15 +140,15 @@ def main():
     test_pitching["球種"] = 9999
     test_pitching["投球位置区域"] = 9999
 
-    train_pitching = train_pitching.head(1000) # メモリ節約のため
-    test_pitching = test_pitching.head(1000) # メモリ節約のため
+    # train_pitching = train_pitching.head(1000) # メモリ節約のため
+    # test_pitching = test_pitching.head(1000) # メモリ節約のため
 
     # 2016~2018年の投手毎球種割合を結合
-    pitching_type_ratio = pd.concat([pitching_type_2016, pitching_type_2017, pitching_type_2018], axis=0)
+    pitching_type_ratio = pd.concat([pitching_type_2016, pitching_type_2017, pitching_type_2018], axis=0).reset_index(drop=True)
 
-    pitch_data = pd.concat([train_pitching, test_pitching], axis=0).drop(PITCH_REMOVAL_COLUMNS, axis=1)
+    pitch_data = pd.concat([train_pitching, test_pitching], axis=0).drop(PITCH_REMOVAL_COLUMNS, axis=1).reset_index(drop=True)
 
-    player_data = pd.concat([train_player, test_player], axis=0).drop(PLAYER_REMOVAL_COLUMNS, axis=1) #.fillna(0)
+    player_data = pd.concat([train_player, test_player], axis=0).drop(PLAYER_REMOVAL_COLUMNS, axis=1).reset_index(drop=True) #.fillna(0)
     pitchers_data = train_player[train_player["位置"] == "投手"].drop(PLAYER_REMOVAL_COLUMNS, axis=1)
 
     merged = pd.merge(
@@ -151,21 +158,23 @@ def main():
         left_on=['年度','投手ID'],
         right_on=['年度','選手ID'],
     ).drop(['選手ID', '投球位置区域'], axis=1).fillna(0)
+    merged = merged.rename(columns={"選手名": "投手名", "チーム名": "投手チーム名"})
 
     # データセットと前年度投球球種割合をmergeする
     merged = pd.merge(
         merged,
         pitching_type_ratio,
         how="left",
-        left_on=['年度','投手ID', "選手名"],
+        left_on=['年度','投手ID', "投手名"],
         right_on=['年度','選手ID', "選手名"]
-    ).drop(['選手ID'], axis=1)
+    ).drop(['選手ID', "選手名"], axis=1)
 
     # データセットと前年度投手成績データをmergeする
     pitchers_results = pitchers_results.replace({'チーム': {"DeNA": "ＤｅＮＡ"}})
+    pitchers_results = pitchers_results.rename(columns={"チーム": "投手チーム名"})
     pitchers_results["年度"] = pitchers_results["年度"] + 1
     pitchers_results = pitchers_results[pitchers_results["年度"] >= 2017]
-    replasce_cols = list(set(pitchers_results.columns) - set(["年度", "チーム", "選手名"]))
+    replasce_cols = list(set(pitchers_results.columns) - set(["年度", "投手チーム名", "選手名"]))
     for col in replasce_cols:
         pitchers_results = pitchers_results.rename(columns={col: f'昨年度_投手_{col}'})
 
@@ -173,24 +182,22 @@ def main():
         merged,
         pitchers_results,
         how="left",
-        left_on=['年度','選手名', "チーム名"],
-        right_on=['年度','選手名', "チーム"]
-    ).drop(['チーム'], axis=1).fillna(0)
+        left_on=['年度','投手名', "投手チーム名"],
+        right_on=['年度','選手名', "投手チーム名"]
+    ).drop(['選手名'], axis=1)
+    merged = merged.fillna(merged.mean())
 
     # データセットと前年度打者成績データをmergeする
     batters_results = batters_results.replace({'チーム': {"DeNA": "ＤｅＮＡ"}})
+    batters_results = batters_results.rename(columns={"チーム": "打者チーム名", "選手名": "打者名"})
     batters_results["年度"] = batters_results["年度"] + 1
-    batters_results = batters_results[batters_results["年度"] >= 2017]
-    replasce_cols = list(set(batters_results.columns) - set(["年度", "チーム", "選手名"]))
+    batters_results = batters_results[batters_results["年度"] >= 2017].reset_index(drop=True)
+    replasce_cols = list(set(batters_results.columns) - set(["年度", "打者チーム名", "打者名"]))
     for col in replasce_cols:
         batters_results = batters_results.rename(columns={col: f'昨年度_打者_{col}'})
 
-    # batters_resultsには"打者ID"列がないため、mergeするために列を新規作成
-    playersID = player_data[['年度', "選手ID", "選手名"]].drop_duplicates().reset_index(drop=True)
-    playersID["打者名"] = playersID["選手名"]
-    playersID = playersID.drop("選手名", axis=1)
-    print(playersID.columns)
-    print(merged.columns)
+    playersID = player_data[['年度', "選手ID", "選手名", "チーム名"]]
+    playersID = playersID.rename(columns={"チーム名": "打者チーム名", "選手名": "打者名"})
     merged = pd.merge(
         merged,
         playersID,
@@ -198,42 +205,48 @@ def main():
         left_on=['年度', "打者ID"],
         right_on=['年度', "選手ID"]
     ).drop(['選手ID'], axis=1)
-    print(merged)
-    print(merged.columns)
-    print(merged[merged.isnull().any(axis=1)])
+    
+    merged = pd.merge(
+        merged,
+        batters_results,
+        how="left",
+        on=['年度', '打者名', "打者チーム名"]
+    )
+    merged = merged.fillna(merged.mean())
+
+    
+    date = merged.loc[:, "日付"]
+    usage = merged.loc[:, "use"]
+    labal = merged.loc[:, "球種"]
+    merged = merged.drop(["日付", "use", "位置", "球種"], axis=1)
+
+    merged = preprocessing(merged)
+
+    # category_encodersによってカテゴリ変数をencordingする
+    categorical_columns = [c for c in merged.columns if merged[c].dtype == 'object']
+    ce_oe = ce.OrdinalEncoder(cols=categorical_columns, handle_unknown='impute')
+    encorded = ce_oe.fit_transform(merged) 
+    encorded = pd.concat([encorded, date, usage, labal], axis=1)
 
 
+    train = encorded[(encorded["use"] == "train") & (encorded["日付"] < "2017-9-1")].drop(["use","日付"], axis=1).reset_index(drop=True)
+    valid = encorded[(encorded["use"] == "train") & (encorded["日付"] >= "2017-9-1")].drop(["use","日付"], axis=1).reset_index(drop=True)
+    test = encorded[(encorded["use"] == "test")].drop(["use","日付"], axis=1).reset_index(drop=True)
 
+    train_x = train.drop("球種", axis=1)
+    train_y = train.loc[:,"球種"]
+    valid_x = valid.drop("球種", axis=1)
+    valid_y = valid.loc[:,"球種"]
+    test_x = test.drop("球種", axis=1)
 
+    print(train_x, train_y, valid_x, valid_y)
 
+    if not os.path.isfile(f"{DATA_DIR}/lgb_model.pkl"):
+        # optunaでチューニング後のモデルを取得
+        gbm = get_model(train_x, train_y, valid_x, valid_y, NUM_CLASS)
 
-
-    # batters_results = pd.merge(
-    #     batters_results,
-    #     playersID,
-    #     how="left",
-    #     left_on=['選手名', "チーム"],
-    #     right_on=['選手名', "チーム名"]
-    # ).drop("チーム", axis=1).fillna(0)
-    # batters_results["選手ID"] = batters_results["選手ID"].astype(np.int16)
-    # print(batters_results["選手ID"])
-    # print(batters_results[batters_results.isnull().any(axis=1)])
-    # print(batters_results.columns)
-
-    # merged = pd.merge(
-    #     merged,
-    #     batters_results,
-    #     how="left",
-    #     left_on=['年度','打者ID', "チーム名"],
-    #     right_on=['年度','選手ID', "チーム名"]
-    # ).drop(['選手ID'], axis=1)
-
-    # print(merged)
-    # print(merged.columns)
-    # print(merged[merged.isnull().any(axis=1)])
-
-
-
+    else:
+        gbm = joblib.load(f"{DATA_DIR}/lgb_model.pkl") 
 
 
 
