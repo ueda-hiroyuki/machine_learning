@@ -1,5 +1,7 @@
 import gc
+import os
 import logging
+import joblib
 import collections
 import typing as t
 import pandas as pd
@@ -17,7 +19,7 @@ from sklearn.decomposition import PCA
 from functools import partial
 from python_file.kaggle.common import common_funcs as cf
 from sklearn.feature_selection import RFE
-from sklearn.model_selection import train_test_split, KFold, StratifiedKFold, cross_val_predict
+from sklearn.model_selection import train_test_split, KFold, StratifiedKFold, cross_val_predict, TimeSeriesSplit
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, LabelEncoder, OneHotEncoder
 from sklearn.metrics import mean_squared_error, r2_score, accuracy_score, roc_auc_score, precision_recall_curve, auc, f1_score
 
@@ -54,6 +56,22 @@ EXTERNAL_7_PATH = f"{EXTERNAL_DATA_DIR}/両リーグの2014～2018までの各�
 
 PITCH_REMOVAL_COLUMNS = ["データ内連番", "試合内連番", "成績対象打者ID", "成績対象投手ID", "打者試合内打席数"]
 PLAYER_REMOVAL_COLUMNS = ["出身高校名", "出身大学名", "生年月日", "出身地", "出身国", "チームID", "社会人","ドラフト年","ドラフト種別","ドラフト順位", "年俸", "育成選手F"]
+
+TEAM_ID_MAP = {
+    1: "巨人",
+    2: "ヤクルト",
+    3: "ＤｅＮＡ",
+    4: "中日",
+    5: "阪神",
+    6: "広島",
+    7: "西武",
+    8: "日本ハム",
+    9: "ロッテ",
+    10: "オリックス",
+    11: "ソフトバンク",
+    12: "楽天"
+}
+
 
 NUM_CLASS = 8
 
@@ -103,7 +121,6 @@ def get_model(train_x, train_y, valid_x, valid_y, num_class) -> t.Any:
         'num_threads': 2,
         'num_leaves' : 30,
         'min_data_in_leaf': 20,
-        'num_iterations' : 100,
         'learning_rate' : 0.1,
         'feature_fraction' : 0.8,
     }
@@ -120,10 +137,10 @@ def get_model(train_x, train_y, valid_x, valid_y, num_class) -> t.Any:
 
 
 def main():
-    train_pitching = pd.read_csv(TRAIN_PITCH_PATH, na_values='不明')
-    train_player = pd.read_csv(TRAIN_PLAYER_PATH, na_values='不明')
-    test_pitching = pd.read_csv(TEST_PITCH_PATH, na_values='不明')
-    test_player = pd.read_csv(TEST_PLAYER_PATH, na_values='不明')
+    train_pitching = pd.read_csv(TRAIN_PITCH_PATH, parse_dates=["日付"])
+    train_player = pd.read_csv(TRAIN_PLAYER_PATH)
+    test_pitching = pd.read_csv(TEST_PITCH_PATH, parse_dates=["日付"])
+    test_player = pd.read_csv(TEST_PLAYER_PATH)
 
     pitching_type_2016 = pd.read_csv(EXTERNAL_1_PATH)
     pitching_type_2017 = pd.read_csv(EXTERNAL_2_PATH)
@@ -184,8 +201,7 @@ def main():
         how="left",
         left_on=['年度','投手名', "投手チーム名"],
         right_on=['年度','選手名', "投手チーム名"]
-    ).drop(['選手名'], axis=1)
-    merged = merged.fillna(merged.mean())
+    ).drop(['選手名'], axis=1).fillna(0) # 今年から登板の投手のデータは0で置換する。
 
     # データセットと前年度打者成績データをmergeする
     batters_results = batters_results.replace({'チーム': {"DeNA": "ＤｅＮＡ"}})
@@ -211,9 +227,13 @@ def main():
         batters_results,
         how="left",
         on=['年度', '打者名', "打者チーム名"]
-    )
-    merged = merged.fillna(merged.mean())
+    ).drop(["打者チーム名", "投手チーム名", "打者名", "投手名"], axis=1).fillna(0) # 昨年度のデータがない打者のデータは0で置換する。
 
+    # aa = merged.isna().sum()
+    # for name, value in aa.items():
+    #     print(name, value)
+    # nan_df = merged[merged.isnull().any(axis=1)]
+    # print(nan_df[["年度","打者名"]].drop_duplicates(), nan_df.columns)
     
     date = merged.loc[:, "日付"]
     usage = merged.loc[:, "use"]
@@ -229,24 +249,54 @@ def main():
     encorded = pd.concat([encorded, date, usage, labal], axis=1)
 
 
-    train = encorded[(encorded["use"] == "train") & (encorded["日付"] < "2017-9-1")].drop(["use","日付"], axis=1).reset_index(drop=True)
-    valid = encorded[(encorded["use"] == "train") & (encorded["日付"] >= "2017-9-1")].drop(["use","日付"], axis=1).reset_index(drop=True)
+    # train = encorded[(encorded["use"] == "train") & (encorded["日付"] < "2017-9-1")].drop(["use","日付"], axis=1).reset_index(drop=True)
+    # valid = encorded[(encorded["use"] == "train") & (encorded["日付"] >= "2017-9-1")].drop(["use","日付"], axis=1).reset_index(drop=True)
+    # test = encorded[(encorded["use"] == "test")].drop(["use","日付"], axis=1).reset_index(drop=True)
+
+    train = encorded[(encorded["use"] == "train")].drop(["use","日付"], axis=1).reset_index(drop=True)
     test = encorded[(encorded["use"] == "test")].drop(["use","日付"], axis=1).reset_index(drop=True)
 
     train_x = train.drop("球種", axis=1)
     train_y = train.loc[:,"球種"]
-    valid_x = valid.drop("球種", axis=1)
-    valid_y = valid.loc[:,"球種"]
     test_x = test.drop("球種", axis=1)
 
-    print(train_x, train_y, valid_x, valid_y)
+    n_splits = 10
+    submission = np.zeros((len(test_x),NUM_CLASS))
 
-    if not os.path.isfile(f"{DATA_DIR}/lgb_model.pkl"):
-        # optunaでチューニング後のモデルを取得
-        gbm = get_model(train_x, train_y, valid_x, valid_y, NUM_CLASS)
+    tss = TimeSeriesSplit(n_splits=n_splits)
+    for i, (tr_idx, val_idx) in enumerate(tss.split(train_x)):
+        tr_x = train_x.iloc[tr_idx].reset_index(drop=True)
+        tr_y = train_y.iloc[tr_idx].reset_index(drop=True)
+        val_x = train_x.iloc[val_idx].reset_index(drop=True)
+        val_y = train_y.iloc[val_idx].reset_index(drop=True)
+        if not os.path.isfile(f"{DATA_DIR}/lgb_model{i}.pkl"):
+            model = get_model(tr_x, tr_y, val_x, val_y, NUM_CLASS)
+            joblib.dump(model, f"{DATA_DIR}/lgb_model{i}.pkl")
+        else:
+            model = joblib.load(f"{DATA_DIR}/lgb_model{i}.pkl") 
 
-    else:
-        gbm = joblib.load(f"{DATA_DIR}/lgb_model.pkl") 
+        y_preda = model.predict(test_x, num_iteration=model.best_iteration) # 0~8の確率
+        submission += y_preda
+
+    submission_df = pd.DataFrame(submission/n_splits)
+    print("#################################")
+    print(submission_df)
+    print("#################################")
+
+    # if not os.path.isfile(f"{DATA_DIR}/lgb_model.pkl"):
+    #     # optunaでチューニング後のモデルを取得
+    #     gbm = get_model(train_x, train_y, valid_x, valid_y, NUM_CLASS)
+    #     joblib.dump(gbm, f"{DATA_DIR}/lgb_model.pkl")
+    # else:
+    #     gbm = joblib.load(f"{DATA_DIR}/lgb_model.pkl") 
+    
+    # y_pred = gbm.predict(test_x)
+    # submission = pd.DataFrame(y_pred)
+    # print("#################################")
+    # print(submission)
+    # print("#################################")
+    
+    # submission.to_csv(f"{DATA_DIR}/my_submission23.csv", header=False)
 
 
 
