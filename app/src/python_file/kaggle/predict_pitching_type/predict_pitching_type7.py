@@ -18,7 +18,7 @@ from sklearn.impute import SimpleImputer
 from sklearn.decomposition import PCA
 from functools import partial
 from python_file.kaggle.common import common_funcs as cf
-from sklearn.feature_selection import RFE
+from sklearn.feature_selection import RFECV, RFE
 from sklearn.model_selection import train_test_split, KFold, StratifiedKFold, cross_val_predict, TimeSeriesSplit
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, LabelEncoder, OneHotEncoder
 from sklearn.metrics import mean_squared_error, r2_score, accuracy_score, roc_auc_score, precision_recall_curve, auc, f1_score
@@ -54,8 +54,42 @@ EXTERNAL_6_PATH = f"{EXTERNAL_DATA_DIR}/両リーグの2014～2018までの各�
 EXTERNAL_7_PATH = f"{EXTERNAL_DATA_DIR}/両リーグの2014～2018までの各打者の年間成績データ.csv"
 
 
-PITCH_REMOVAL_COLUMNS = ["データ内連番", "試合内連番", "成績対象打者ID", "成績対象投手ID", "打者試合内打席数"]
+PITCH_REMOVAL_COLUMNS = ["時刻", "データ内連番", "試合内連番", "成績対象打者ID", "成績対象投手ID", "打者試合内打席数"]
 PLAYER_REMOVAL_COLUMNS = ["出身高校名", "出身大学名", "生年月日", "出身地", "出身国", "チームID", "社会人","ドラフト年","ドラフト種別","ドラフト順位", "年俸", "育成選手F"]
+
+FINAL_REMOVAL_COLUMNS = [
+    "試合ID",
+    "年度", 
+    "イニング", 
+    "ホームチームID", 
+    "アウェイチームID", 
+    "投", 
+    "打", 
+    "打席内投球数",
+    "投手役割", 
+    "投手試合内対戦打者数", 
+    "昨年度_投手_防御率", 
+    "イニング",
+    "昨年度_投手_敗北",
+    "昨年度_投手_被安打",
+    "昨年度_投手_奪三振",
+    "昨年度_投手_打者",
+    "昨年度_投手_投球回",
+    "昨年度_投手_自責点",
+    "昨年度_投手_失点",
+    "昨年度_投手_DIPS",
+    "昨年度_打者_OPS",
+    "昨年度_打者_打数",
+    "昨年度_打者_打席数",
+    "昨年度_打者_打率",
+    "昨年度_打者_三振",
+    "昨年度_打者_試合",
+    "昨年度_打者_RC27",
+    "昨年度_打者_長打率",
+    "昨年度_打者_本塁打",
+    "昨年度_打者_四球",
+]
+
 
 TEAM_ID_MAP = {
     1: "巨人",
@@ -77,10 +111,47 @@ NUM_CLASS = 8
 
 
 def preprocessing(df):
-    df['走者'] = np.where(df["プレイ前走者状況"] == "___", 0, 1) # プレイ前ランナーがいるかいないか。
+    #df['走者'] = np.where(df["プレイ前走者状況"] == "___", 0, 1) # プレイ前ランナーがいるかいないか。
     df['BMI'] = (df["体重"]/(df["身長"]/100)**2) # 身長体重をBMIに変換
     df = df.drop(["体重", "身長"], axis=1)
     return df
+
+
+def get_selected_columns(train_x, train_y, n_splits):
+    skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=1)
+    est = lgb.LGBMClassifier()
+    selector = RFECV(estimator=est, step=0.05, n_jobs=1, min_features_to_select=round(len(train_x)*0.8), cv=skf, verbose=10)
+    selector.fit(train_x, train_y)
+    selected_columns = train_x.columns[selector.support_]
+    return selected_columns
+
+
+def objective(X, y, trial):
+    """最適化する目的関数"""
+    tr_x, val_x, tr_y, val_y = train_test_split(X, y, random_state=1)
+    gbm = lgb.LGBMClassifier(
+        objective="multiclass",
+        boosting_type= 'gbdt', 
+        n_jobs = 4,
+        n_estimators=1000,
+    )
+    # RFE で取り出す特徴量の数を最適化する
+    n_features_to_select = trial.suggest_int('n_features_to_select', 1, len(list(tr_x.columns))),
+    rfe = RFE(estimator=gbm, n_features_to_select=n_features_to_select)
+    rfe.fit(tr_x, tr_y)
+    selected_cols = list(tr_x.columns[rfe.support_])
+    
+    tr_x_selected = tr_x.loc[:, selected_cols]
+    val_x_selected = val_x.loc[:, selected_cols]
+    gbm.fit(
+        tr_x_selected, 
+        tr_y,
+        eval_set=[(val_x_selected, val_y)],
+        early_stopping_rounds=20
+    )
+    y_pred = gbm.predict(val_x_selected)
+    f1 = f1_score(val_y, y_pred, average="micro")
+    return f1
 
 
 def get_best_params(train_x: t.Any, train_y: t.Any, num_class: int) -> t.Any:
@@ -108,24 +179,24 @@ def get_best_params(train_x: t.Any, train_y: t.Any, num_class: int) -> t.Any:
     )
     return best_params
 
-def get_model(train_x, train_y, valid_x, valid_y, num_class) -> t.Any:
+def get_model(train_x, train_y, valid_x, valid_y, num_class, best_params) -> t.Any:
     # 学習用データセット
     train_set = lgb.Dataset(train_x, train_y)
     # 評価用データセット
     valid_set = lgb.Dataset(valid_x, valid_y)
-    lgb_params = {
-        'objective': 'multiclass',
-        'metric': 'multi_logloss',
-        'boosting_type': 'gbdt',
-        'num_class': num_class,
-        'num_threads': 2,
-        'num_leaves' : 30,
-        'min_data_in_leaf': 20,
-        'learning_rate' : 0.1,
-        'feature_fraction' : 0.8,
-    }
+    # lgb_params = {
+    #     'objective': 'multiclass',
+    #     'metric': 'multi_logloss',
+    #     'boosting_type': 'gbdt',
+    #     'num_class': num_class,
+    #     'num_threads': 2,
+    #     'num_leaves' : 30,
+    #     'min_data_in_leaf': 20,
+    #     'learning_rate' : 0.1,
+    #     'feature_fraction' : 0.8,
+    # }
     model = lgb.train(
-        params=lgb_params,
+        params=best_params,
         train_set=train_set,
         valid_sets=[train_set, valid_set],
         early_stopping_rounds=20,
@@ -157,8 +228,8 @@ def main():
     test_pitching["球種"] = 9999
     test_pitching["投球位置区域"] = 9999
 
-    # train_pitching = train_pitching.head(1000) # メモリ節約のため
-    # test_pitching = test_pitching.head(1000) # メモリ節約のため
+    # train_pitching = train_pitching.head(100) # メモリ節約のため
+    # test_pitching = test_pitching.head(100) # メモリ節約のため
 
     # 2016~2018年の投手毎球種割合を結合
     pitching_type_ratio = pd.concat([pitching_type_2016, pitching_type_2017, pitching_type_2018], axis=0).reset_index(drop=True)
@@ -247,6 +318,9 @@ def main():
     ce_oe = ce.OrdinalEncoder(cols=categorical_columns, handle_unknown='impute')
     encorded = ce_oe.fit_transform(merged) 
     encorded = pd.concat([encorded, date, usage, labal], axis=1)
+    encorded = encorded.drop(FINAL_REMOVAL_COLUMNS, axis=1)
+
+    # cf.check_corr(encorded, "predict_pitching_type")
 
 
     # train = encorded[(encorded["use"] == "train") & (encorded["日付"] < "2017-9-1")].drop(["use","日付"], axis=1).reset_index(drop=True)
@@ -259,23 +333,31 @@ def main():
     train_x = train.drop("球種", axis=1)
     train_y = train.loc[:,"球種"]
     test_x = test.drop("球種", axis=1)
-
+    
     n_splits = 10
-    submission = np.zeros((len(test_x),NUM_CLASS))
+    selected_columns = get_selected_columns(train_x, train_y, n_splits)
+    train_x_reduced = train_x.loc[:, selected_columns]
+    test_x_reduced = test_x.loc[:, selected_columns]
+    if not os.path.isfile(f"{DATA_DIR}/best_params.pkl"):
+        best_params = get_best_params(train_x_reduced, train_y, NUM_CLASS) # 最適ハイパーパラメータの探索
+        joblib.dump(best_params, f"{DATA_DIR}/best_params.pkl")
+    else:
+        best_params = joblib.load(f"{DATA_DIR}/best_params.pkl") 
 
-    tss = TimeSeriesSplit(n_splits=n_splits)
-    for i, (tr_idx, val_idx) in enumerate(tss.split(train_x)):
+    submission = np.zeros((len(test_x_reduced),NUM_CLASS))
+    skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=1)
+    for i, (tr_idx, val_idx) in enumerate(skf.split(train_x_reduced, train_y)):
         tr_x = train_x.iloc[tr_idx].reset_index(drop=True)
         tr_y = train_y.iloc[tr_idx].reset_index(drop=True)
         val_x = train_x.iloc[val_idx].reset_index(drop=True)
         val_y = train_y.iloc[val_idx].reset_index(drop=True)
         if not os.path.isfile(f"{DATA_DIR}/lgb_model{i}.pkl"):
-            model = get_model(tr_x, tr_y, val_x, val_y, NUM_CLASS)
+            model = get_model(tr_x, tr_y, val_x, val_y, NUM_CLASS, best_params)
             joblib.dump(model, f"{DATA_DIR}/lgb_model{i}.pkl")
         else:
             model = joblib.load(f"{DATA_DIR}/lgb_model{i}.pkl") 
 
-        y_preda = model.predict(test_x, num_iteration=model.best_iteration) # 0~8の確率
+        y_preda = model.predict(test_x_reduced, num_iteration=model.best_iteration) # 0~8の確率
         submission += y_preda
 
     submission_df = pd.DataFrame(submission/n_splits)
@@ -296,7 +378,7 @@ def main():
     # print(submission)
     # print("#################################")
     
-    # submission.to_csv(f"{DATA_DIR}/my_submission23.csv", header=False)
+    submission_df.to_csv(f"{DATA_DIR}/my_submission25.csv", header=False)
 
 
 
