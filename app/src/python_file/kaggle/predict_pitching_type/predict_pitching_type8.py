@@ -197,12 +197,12 @@ def get_model(train_x, train_y, valid_x, valid_y, num_class, best_params) -> t.A
         params=params,
         train_set=train_set,
         valid_sets=[valid_set, train_set],
-        num_boost_round=1,
+        num_boost_round=500,
         valid_names=['eval','train'],
         evals_result=evals_result,
         verbose_eval=10,
         learning_rates=lambda iter: 0.1 * (0.99 ** iter),
-        callbacks=[lgb.reset_parameter(feature_fraction=[0.7] * 400 + [0.5] * 100)]
+        callbacks=[lgb.reset_parameter(feature_fraction=[0.8] * 400 + [1.0] * 100)]
     )
     importance = pd.DataFrame(model.feature_importance(), index=train_x.columns, columns=['importance']).sort_values('importance', ascending=[False])
     print(importance.head(50))
@@ -354,6 +354,7 @@ def main():
     alphas = [1.028, 1.023, 1.018, 1.015]
     weights = [1/len(alphas)] * len(alphas)
     for  icount, (alpha, weight) in enumerate(zip(alphas, weights)):
+        preds = np.zeros((len(test_x),NUM_CLASS))
         for i, (tr_idx, val_idx) in enumerate(tscv.split(train_x)):
             tr_x = train_x.iloc[tr_idx].reset_index(drop=True)
             tr_y = train_y.iloc[tr_idx].reset_index(drop=True)
@@ -365,14 +366,14 @@ def main():
             else:
                 model = joblib.load(f"{DATA_DIR}/test_lgb_model{i}.pkl")
 
-            # # 学習曲線の描画
-            # fig = lgb.plot_metric(evals_result, metric="multi_logloss")
-            # plt.savefig(f"{DATA_DIR}/learning_curve{i}.png")
+            # 学習曲線の描画
+            fig = lgb.plot_metric(evals_result, metric="multi_logloss")
+            plt.savefig(f"{DATA_DIR}/learning_curve{i}.png")
 
 
             y_preda = alpha * model.predict(test_x, num_iteration=model.best_iteration) # 0~8の確率
-            submission += y_preda
-        submission *= weight
+            preds += y_preda
+        submission += preds * weight
 
     submission_df = pd.DataFrame(submission/n_splits)
     print("#################################")
