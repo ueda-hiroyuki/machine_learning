@@ -21,6 +21,7 @@ from python_file.kaggle.common import common_funcs as cf
 from sklearn.feature_selection import RFECV, RFE
 from sklearn.model_selection import train_test_split, KFold, StratifiedKFold, cross_val_predict, TimeSeriesSplit
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, LabelEncoder, OneHotEncoder
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor 
 from sklearn.metrics import mean_squared_error, r2_score, accuracy_score, roc_auc_score, precision_recall_curve, auc, f1_score
 
 
@@ -120,7 +121,7 @@ def preprocessing(df):
 def get_selected_columns(train_x, train_y, n_splits):
     skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=1)
     est = lgb.LGBMClassifier()
-    selector = RFECV(estimator=est, step=0.05, n_jobs=1, min_features_to_select=round(len(train_x)*0.8), cv=skf, verbose=10)
+    selector = RFECV(estimator=est, step=0.05, n_jobs=2, min_features_to_select=round(len(train_x)*0.8), cv=skf, verbose=10)
     selector.fit(train_x, train_y)
     selected_columns = train_x.columns[selector.support_]
     return selected_columns
@@ -132,7 +133,7 @@ def objective(X, y, trial):
     gbm = lgb.LGBMClassifier(
         objective="multiclass",
         boosting_type= 'gbdt', 
-        n_jobs = 4,
+        n_jobs = 2,
         n_estimators=1000,
     )
     # RFE で取り出す特徴量の数を最適化する
@@ -382,11 +383,6 @@ def main():
 
 
 
-
-
-
-
-
-
 if __name__ == "__main__":
-    main()
+    with ProcessPoolExecutor(max_workers=1) as executer:
+        executer.submit(main()) # CPU4つ使っている。
