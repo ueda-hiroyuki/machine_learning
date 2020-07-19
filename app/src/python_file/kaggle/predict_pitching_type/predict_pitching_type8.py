@@ -69,26 +69,25 @@ FINAL_REMOVAL_COLUMNS = [
     "打席内投球数",
     "投手役割",
     "投手試合内対戦打者数",
-    "昨年度_投手_防御率",
-    "イニング",
-    "昨年度_投手_敗北",
-    "昨年度_投手_被安打",
-    "昨年度_投手_奪三振",
-    "昨年度_投手_打者",
-    "昨年度_投手_投球回",
-    "昨年度_投手_自責点",
-    "昨年度_投手_失点",
-    "昨年度_投手_DIPS",
-    "昨年度_打者_OPS",
-    "昨年度_打者_打数",
-    "昨年度_打者_打席数",
-    "昨年度_打者_打率",
-    "昨年度_打者_三振",
-    "昨年度_打者_試合",
-    "昨年度_打者_RC27",
-    "昨年度_打者_長打率",
-    "昨年度_打者_本塁打",
-    "昨年度_打者_四球",
+    # "昨年度_投手_防御率",
+    # "昨年度_投手_敗北",
+    # "昨年度_投手_被安打",
+    # "昨年度_投手_奪三振",
+    # "昨年度_投手_打者",
+    # "昨年度_投手_投球回",
+    # "昨年度_投手_自責点",
+    # "昨年度_投手_失点",
+    # "昨年度_投手_DIPS",
+    # "昨年度_打者_OPS",
+    # "昨年度_打者_打数",
+    # "昨年度_打者_打席数",
+    # "昨年度_打者_打率",
+    # "昨年度_打者_三振",
+    # "昨年度_打者_試合",
+    # "昨年度_打者_RC27",
+    # "昨年度_打者_長打率",
+    # "昨年度_打者_本塁打",
+    # "昨年度_打者_四球",
 ]
 
 
@@ -177,7 +176,6 @@ def get_best_params(train_x, train_y, valid_x, valid_y) -> t.Any:
         eval_set = [[valid_x, valid_y]]
     )
     best_params = clf.best_params_
-
     return best_params
 
 def get_model(train_x, train_y, valid_x, valid_y, num_class, best_params) -> t.Any:
@@ -207,9 +205,10 @@ def get_model(train_x, train_y, valid_x, valid_y, num_class, best_params) -> t.A
         train_set=train_set,
         valid_sets=[valid_set, train_set],
         num_boost_round=1000,
+        early_stopping_rounds=100,
         verbose_eval=10,
         # learning_rates=lambda iter: 0.1 * (0.99 ** iter),
-        callbacks=[lgb.reset_parameter(learning_rates=[0.2] * 400 + [0.1] * 400 + [0.05] * 200)],
+        callbacks=[lgb.reset_parameter(learning_rate=[0.2] * 400 + [0.1] * 400 + [0.05] * 200)],
         evals_result=evals_result,
     )
     importance = pd.DataFrame(model.feature_importance(), index=train_x.columns, columns=['importance']).sort_values('importance', ascending=[False])
@@ -350,10 +349,10 @@ def main():
     else:
         best_params = joblib.load(f"{DATA_DIR}/best_params.pkl")
 
-    n_splits = 5
+    n_splits = 3
     submission = np.zeros((len(test_x),NUM_CLASS))
     tscv = TimeSeriesSplit(n_splits=n_splits)
-    alphas = [1.03, 1.02, 1.01, 0.99, 0.98, 0.97]
+    alphas = [1.02, 1.01, 0.99, 0.98]
     weights = [1/len(alphas)] * len(alphas)
     for  icount, (alpha, weight) in enumerate(zip(alphas, weights)):
         preds = np.zeros((len(test_x),NUM_CLASS))

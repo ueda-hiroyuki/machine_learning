@@ -17,7 +17,7 @@ from sklearn.decomposition import PCA
 from functools import partial
 from python_file.kaggle.common import common_funcs as cf
 from sklearn.feature_selection import RFE
-from sklearn.model_selection import train_test_split, KFold, StratifiedKFold, cross_val_predict
+from sklearn.model_selection import train_test_split, KFold, StratifiedKFold, cross_val_predict, GroupKFold
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, LabelEncoder, OneHotEncoder
 from sklearn.metrics import mean_squared_error, r2_score, accuracy_score, roc_auc_score, precision_recall_curve, auc, f1_score
 
@@ -40,6 +40,9 @@ TRAIN_PITCH_PATH = f"{DATA_DIR}/train_pitch.csv"
 TRAIN_PLAYER_PATH = f"{DATA_DIR}/train_player.csv"
 TEST_PITCH_PATH = f"{DATA_DIR}/test_pitch.csv"
 TEST_PLAYER_PATH = f"{DATA_DIR}/test_player.csv"
+EXTERNAL_1_PATH = f"{EXTERNAL_DATA_DIR}/2017登録投手の昨年球種配分.csv"
+EXTERNAL_2_PATH = f"{EXTERNAL_DATA_DIR}/2018登録投手の昨年球種配分.csv"
+EXTERNAL_3_PATH = f"{EXTERNAL_DATA_DIR}/2019登録投手の昨年球種配分.csv"
 
 PITCH_REMOVAL_COLUMNS = ["日付", "時刻", "試合内連番", "成績対象打者ID", "成績対象投手ID", "打者試合内打席数", "試合ID"]
 PLAYER_REMOVAL_COLUMNS = ["出身高校名", "出身大学名", "生年月日", "出身地", "出身国", "チームID", "社会人","ドラフト年","ドラフト種別","ドラフト順位", "年俸", "育成選手F"]
@@ -94,29 +97,8 @@ def get_model(tr_dataset: t.Any, val_dataset: t.Any, num_class: int, best_params
         params=params,
         train_set=tr_dataset,
         valid_sets=[val_dataset, tr_dataset],
-        num_boost_round=1000,
-        early_stopping_rounds=100,
-        verbose_eval=50,
-        evals_result=evals_result,
-    )
-    params['learning_rate'] = 0.05
-    model = lgb.train(
-        params=params,
-        train_set=tr_dataset,
-        valid_sets=[val_dataset, tr_dataset],
-        init_model=model,
-        num_boost_round=1000,
-        early_stopping_rounds=100,
-        verbose_eval=50,
-        evals_result=evals_result,
-    )
-    params['learning_rate'] = 0.01
-    model = lgb.train(
-        params=params,
-        train_set=tr_dataset,
-        valid_sets=[val_dataset, tr_dataset],
-        init_model=model,
-        num_boost_round=1000,
+        num_boost_round=1000
+        learning_rates=lambda iter: 0.1 * (0.99 ** iter),
         early_stopping_rounds=100,
         verbose_eval=50,
         evals_result=evals_result,
@@ -164,6 +146,10 @@ def main():
     test_pitch = pd.read_csv(TEST_PITCH_PATH)
     test_player = pd.read_csv(TEST_PLAYER_PATH)
 
+    pitching_type_2016 = pd.read_csv(EXTERNAL_1_PATH)
+    pitching_type_2017 = pd.read_csv(EXTERNAL_2_PATH)
+    pitching_type_2018 = pd.read_csv(EXTERNAL_3_PATH)
+
     train_pitch["use"] = "train"
     test_pitch["use"] = "test"
     test_pitch["球種"] = 0
@@ -171,22 +157,33 @@ def main():
 
     player_data = pd.concat([train_player, test_player], axis=0).drop(PLAYER_REMOVAL_COLUMNS, axis=1) #.fillna(0)
     pitchers_data = train_player[train_player["位置"] == "投手"].drop(PLAYER_REMOVAL_COLUMNS, axis=1)
+    pitching_type_ratio = pd.concat([pitching_type_2016, pitching_type_2017, pitching_type_2018], axis=0).reset_index(drop=True)
 
-    merged_data = pd.merge(
+    merged = pd.merge(
         pitch_data, 
         player_data, 
         how="left", 
         left_on=['年度','投手ID'], 
         right_on=['年度','選手ID'],
     ).drop(['選手ID', '投球位置区域'], axis=1).fillna(0)
+    merged = merged.rename(columns={"選手名": "投手名", "チーム名": "投手チーム名"})
 
-    use = merged_data.loc[:, "use"]
-    merged_data = merged_data.drop(["use", "位置", "年度"], axis=1)
+    # データセットと前年度投球球種割合をmergeする
+    merged = pd.merge(
+        merged,
+        pitching_type_ratio,
+        how="left",
+        left_on=['年度','投手ID', "投手名"],
+        right_on=['年度','選手ID', "選手名"]
+    ).drop(['選手ID', "選手名"], axis=1)
+
+    use = merged.loc[:, "use"]
+    merged = merged.drop(["use", "位置", "年度"], axis=1)
 
     # category_encodersによってカテゴリ変数をencordingする
-    categorical_columns = [c for c in merged_data.columns if merged_data[c].dtype == 'object']
+    categorical_columns = [c for c in merged.columns if merged[c].dtype == 'object']
     ce_oe = ce.OrdinalEncoder(cols=categorical_columns, handle_unknown='impute')
-    encorded_data = ce_oe.fit_transform(merged_data) 
+    encorded_data = ce_oe.fit_transform(merged) 
     encorded_data = pd.concat([encorded_data, use], axis=1)
  
     train = encorded_data[encorded_data["use"] == "train"].drop("use", axis=1).reset_index(drop=True)
@@ -203,7 +200,7 @@ def main():
     # print('params:', study.best_params)# 発見したパラメータを出力する
     # best_feature_count = study.best_params['n_components']
     best_feature_count = 47
-    x_pca, train_y = get_important_features(train_x, train_y, best_feature_count)  
+    # x_pca, train_y = get_important_features(train_x, train_y, best_feature_count)  
 
     n_splits = 5
     num_class = 8
@@ -222,8 +219,8 @@ def main():
     submission = np.zeros((len(test_x),num_class))
     accs = {}
 
-    skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=0)
-    for i, (tr_idx, val_idx) in enumerate(skf.split(x_pca, train_y)):
+    gkf = GroupKFold(n_splits=5)
+    for i, (tr_idx, val_idx) in enumerate(gkf.split(train_x, train_y, groups=train_x["投手ID"])):
         tr_x = train_x.iloc[tr_idx].reset_index(drop=True)
         tr_y = train_y.iloc[tr_idx].reset_index(drop=True)
         val_x = train_x.iloc[val_idx].reset_index(drop=True)
