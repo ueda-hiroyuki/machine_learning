@@ -181,10 +181,19 @@ def get_best_params(train_x, train_y, valid_x, valid_y) -> t.Any:
     return best_params
 
 def get_model(train_x, train_y, valid_x, valid_y, num_class, best_params) -> t.Any:
+    best_params = {
+        'lambda_l1': 5.96,
+        'lambda_l2': 1.1,
+        'num_leaves': 12,
+        'feature_fraction': 0.75,
+        'bagging_fraction': 0.89,
+        'bagging_freq': 7,
+        #'min_child_sample': 100
+    }
     # 学習用データセット
-    train_set = lgb.Dataset(train_x, train_y)
+    train_set = lgb.Dataset(train_x, train_y, free_raw_data=False)
     # 評価用データセット
-    valid_set = lgb.Dataset(valid_x, valid_y)
+    valid_set = lgb.Dataset(valid_x, valid_y, free_raw_data=False)
     evals_result = {}
     params = {
         'objective': 'multiclass',
@@ -197,12 +206,11 @@ def get_model(train_x, train_y, valid_x, valid_y, num_class, best_params) -> t.A
         params=params,
         train_set=train_set,
         valid_sets=[valid_set, train_set],
-        num_boost_round=500,
-        valid_names=['eval','train'],
-        evals_result=evals_result,
+        num_boost_round=1000,
         verbose_eval=10,
-        learning_rates=lambda iter: 0.1 * (0.99 ** iter),
-        callbacks=[lgb.reset_parameter(feature_fraction=[0.8] * 400 + [1.0] * 100)]
+        # learning_rates=lambda iter: 0.1 * (0.99 ** iter),
+        callbacks=[lgb.reset_parameter(learning_rates=[0.2] * 400 + [0.1] * 400 + [0.05] * 200)],
+        evals_result=evals_result,
     )
     importance = pd.DataFrame(model.feature_importance(), index=train_x.columns, columns=['importance']).sort_values('importance', ascending=[False])
     print(importance.head(50))
@@ -276,37 +284,31 @@ def main():
         right_on=['年度','選手名', "投手チーム名"]
     ).drop(['選手名'], axis=1).fillna(0) # 今年から登板の投手のデータは0で置換する。
 
-    # データセットと前年度打者成績データをmergeする
-    batters_results = batters_results.replace({'チーム': {"DeNA": "ＤｅＮＡ"}})
-    batters_results = batters_results.rename(columns={"チーム": "打者チーム名", "選手名": "打者名"})
-    batters_results["年度"] = batters_results["年度"] + 1
-    batters_results = batters_results[batters_results["年度"] >= 2017].reset_index(drop=True)
-    replasce_cols = list(set(batters_results.columns) - set(["年度", "打者チーム名", "打者名"]))
-    for col in replasce_cols:
-        batters_results = batters_results.rename(columns={col: f'昨年度_打者_{col}'})
+    # # データセットと前年度打者成績データをmergeする
+    # batters_results = batters_results.replace({'チーム': {"DeNA": "ＤｅＮＡ"}})
+    # batters_results = batters_results.rename(columns={"チーム": "打者チーム名", "選手名": "打者名"})
+    # batters_results["年度"] = batters_results["年度"] + 1
+    # batters_results = batters_results[batters_results["年度"] >= 2017].reset_index(drop=True)
+    # replasce_cols = list(set(batters_results.columns) - set(["年度", "打者チーム名", "打者名"]))
+    # for col in replasce_cols:
+    #     batters_results = batters_results.rename(columns={col: f'昨年度_打者_{col}'})
 
-    playersID = player_data[['年度', "選手ID", "選手名", "チーム名"]]
-    playersID = playersID.rename(columns={"チーム名": "打者チーム名", "選手名": "打者名"})
-    merged = pd.merge(
-        merged,
-        playersID,
-        how="left",
-        left_on=['年度', "打者ID"],
-        right_on=['年度', "選手ID"]
-    ).drop(['選手ID'], axis=1)
+    # playersID = player_data[['年度', "選手ID", "選手名", "チーム名"]]
+    # playersID = playersID.rename(columns={"チーム名": "打者チーム名", "選手名": "打者名"})
+    # merged = pd.merge(
+    #     merged,
+    #     playersID,
+    #     how="left",
+    #     left_on=['年度', "打者ID"],
+    #     right_on=['年度', "選手ID"]
+    # ).drop(['選手ID'], axis=1)
 
-    merged = pd.merge(
-        merged,
-        batters_results,
-        how="left",
-        on=['年度', '打者名', "打者チーム名"]
-    ).drop(["打者チーム名", "投手チーム名", "打者名", "投手名"], axis=1).fillna(0) # 昨年度のデータがない打者のデータは0で置換する。
-
-    # aa = merged.isna().sum()
-    # for name, value in aa.items():
-    #     print(name, value)
-    # nan_df = merged[merged.isnull().any(axis=1)]
-    # print(nan_df[["年度","打者名"]].drop_duplicates(), nan_df.columns)
+    # merged = pd.merge(
+    #     merged,
+    #     batters_results,
+    #     how="left",
+    #     on=['年度', '打者名', "打者チーム名"]
+    # ).drop(["打者チーム名", "投手チーム名", "打者名", "投手名"], axis=1).fillna(0) # 昨年度のデータがない打者のデータは0で置換する。
 
     date = merged.loc[:, "日付"]
     usage = merged.loc[:, "use"]
@@ -348,10 +350,10 @@ def main():
     else:
         best_params = joblib.load(f"{DATA_DIR}/best_params.pkl")
 
-    n_splits = 2
+    n_splits = 5
     submission = np.zeros((len(test_x),NUM_CLASS))
     tscv = TimeSeriesSplit(n_splits=n_splits)
-    alphas = [1.028, 1.023, 1.018, 1.015]
+    alphas = [1.03, 1.02, 1.01, 0.99, 0.98, 0.97]
     weights = [1/len(alphas)] * len(alphas)
     for  icount, (alpha, weight) in enumerate(zip(alphas, weights)):
         preds = np.zeros((len(test_x),NUM_CLASS))
@@ -360,19 +362,14 @@ def main():
             tr_y = train_y.iloc[tr_idx].reset_index(drop=True)
             val_x = train_x.iloc[val_idx].reset_index(drop=True)
             val_y = train_y.iloc[val_idx].reset_index(drop=True)
-            if not os.path.isfile(f"{DATA_DIR}/test_lgb_model{i}.pkl"):
-                model, evals_result = get_model(tr_x, tr_y, val_x, val_y, NUM_CLASS, best_params)
-                joblib.dump(model, f"{DATA_DIR}/test_lgb_model{i}.pkl")
-            else:
-                model = joblib.load(f"{DATA_DIR}/test_lgb_model{i}.pkl")
-
+            model, evals_result = get_model(tr_x, tr_y, val_x, val_y, NUM_CLASS, best_params)
+            
             # 学習曲線の描画
             fig = lgb.plot_metric(evals_result, metric="multi_logloss")
-            plt.savefig(f"{DATA_DIR}/learning_curve{i}.png")
-
-
+            plt.savefig(f"{DATA_DIR}/learning_curve_{icount}_{i}.png")
             y_preda = alpha * model.predict(test_x, num_iteration=model.best_iteration) # 0~8の確率
             preds += y_preda
+
         submission += preds * weight
 
     submission_df = pd.DataFrame(submission/n_splits)
@@ -380,7 +377,7 @@ def main():
     print(submission_df)
     print("#################################")
 
-    submission_df.to_csv(f"{DATA_DIR}/my_submission28.csv", header=False)
+    submission_df.to_csv(f"{DATA_DIR}/my_submission30.csv", header=False)
 
 
 

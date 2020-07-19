@@ -40,7 +40,6 @@ TRAIN_PITCH_PATH = f"{DATA_DIR}/train_pitch.csv"
 TRAIN_PLAYER_PATH = f"{DATA_DIR}/train_player.csv"
 TEST_PITCH_PATH = f"{DATA_DIR}/test_pitch.csv"
 TEST_PLAYER_PATH = f"{DATA_DIR}/test_player.csv"
-SUBMISSION_PATH = f"{DATA_DIR}/sample_submit_ball_type.csv"
 
 PITCH_REMOVAL_COLUMNS = ["日付", "時刻", "試合内連番", "成績対象打者ID", "成績対象投手ID", "打者試合内打席数", "試合ID"]
 PLAYER_REMOVAL_COLUMNS = ["出身高校名", "出身大学名", "生年月日", "出身地", "出身国", "チームID", "社会人","ドラフト年","ドラフト種別","ドラフト順位", "年俸", "育成選手F"]
@@ -81,17 +80,46 @@ def get_best_params(train_x: t.Any, train_y: t.Any, num_class: int) -> t.Any:
     )
     return best_params
 
-def get_model(tr_dataset: t.Any, val_dataset: t.Any, params: t.Dict[str, t.Any]) -> t.Any:
+def get_model(tr_dataset: t.Any, val_dataset: t.Any, num_class: int, best_params: t.Dict[str, t.Any]) -> t.Any:
     evals_result = {}
+    params = {
+        'objective': 'multiclass',
+        'metric': 'multi_logloss',
+        'boosting_type': 'gbdt',
+        'learning_rate' : 0.1,
+        'num_class': num_class,
+        **best_params
+    }
     model = lgb.train(
         params=params,
         train_set=tr_dataset,
         valid_sets=[val_dataset, tr_dataset],
-        early_stopping_rounds=20,
-        num_boost_round=10000,
-        valid_names=['eval','train'],
+        num_boost_round=1000,
+        early_stopping_rounds=100,
+        verbose_eval=50,
         evals_result=evals_result,
-        feval=accuracy,
+    )
+    params['learning_rate'] = 0.05
+    model = lgb.train(
+        params=params,
+        train_set=tr_dataset,
+        valid_sets=[val_dataset, tr_dataset],
+        init_model=model,
+        num_boost_round=1000,
+        early_stopping_rounds=100,
+        verbose_eval=50,
+        evals_result=evals_result,
+    )
+    params['learning_rate'] = 0.01
+    model = lgb.train(
+        params=params,
+        train_set=tr_dataset,
+        valid_sets=[val_dataset, tr_dataset],
+        init_model=model,
+        num_boost_round=1000,
+        early_stopping_rounds=100,
+        verbose_eval=50,
+        evals_result=evals_result,
     )
     return model, evals_result
 
@@ -135,7 +163,6 @@ def main():
     train_player = pd.read_csv(TRAIN_PLAYER_PATH)
     test_pitch = pd.read_csv(TEST_PITCH_PATH)
     test_player = pd.read_csv(TEST_PLAYER_PATH)
-    sub = pd.read_csv(SUBMISSION_PATH)
 
     train_pitch["use"] = "train"
     test_pitch["use"] = "test"
@@ -169,49 +196,46 @@ def main():
     train_y = train.loc[:,"球種"]
     test_x = test.drop("球種", axis=1)
 
-    f = partial(objective, train_x, train_y) # 目的関数に引数を固定しておく
-    study = optuna.create_study(direction='maximize') # Optuna で取り出す特徴量の数を最適化する
+    # f = partial(objective, train_x, train_y) # 目的関数に引数を固定しておく
+    # study = optuna.create_study(direction='maximize') # Optuna で取り出す特徴量の数を最適化する
 
-    study.optimize(f, n_trials=10) # 試行回数を決定する
-    print('params:', study.best_params)# 発見したパラメータを出力する
-    best_feature_count = study.best_params['n_components']
+    # study.optimize(f, n_trials=10) # 試行回数を決定する
+    # print('params:', study.best_params)# 発見したパラメータを出力する
+    # best_feature_count = study.best_params['n_components']
+    best_feature_count = 47
     x_pca, train_y = get_important_features(train_x, train_y, best_feature_count)  
 
-    n_splits = 10
+    n_splits = 5
     num_class = 8
-    best_params = get_best_params(x_pca, train_y, num_class) # 最適ハイパーパラメータの探索
+    # best_params = get_best_params(x_pca, train_y, num_class) # 最適ハイパーパラメータの探索
+
+    best_params = {
+        'lambda_l1': 5.96,
+        'lambda_l2': 1.1,
+        'num_leaves': 12,
+        'feature_fraction': 0.75,
+        'bagging_fraction': 0.89,
+        'bagging_freq': 7,
+        #'min_child_sample': 100
+    }
 
     submission = np.zeros((len(test_x),num_class))
     accs = {}
 
-    kf = KFold(n_splits=n_splits, shuffle=True, random_state=0)
-    for i, (tr_idx, val_idx) in enumerate(kf.split(x_pca, train_y)):
+    skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=0)
+    for i, (tr_idx, val_idx) in enumerate(skf.split(x_pca, train_y)):
         tr_x = train_x.iloc[tr_idx].reset_index(drop=True)
         tr_y = train_y.iloc[tr_idx].reset_index(drop=True)
         val_x = train_x.iloc[val_idx].reset_index(drop=True)
         val_y = train_y.iloc[val_idx].reset_index(drop=True)
 
-        tr_dataset = lgb.Dataset(tr_x, tr_y)
-        val_dataset = lgb.Dataset(val_x, val_y, reference=tr_dataset)
-        model, evals_result = get_model(tr_dataset, val_dataset, best_params)
+        tr_dataset = lgb.Dataset(tr_x, tr_y, free_raw_data=False)
+        val_dataset = lgb.Dataset(val_x, val_y, reference=tr_dataset, free_raw_data=False)
+        model, evals_result = get_model(tr_dataset, val_dataset, num_class, best_params)
         
         # 学習曲線の描画
-        eval_metric_logloss = evals_result['eval']['multi_logloss']
-        train_metric_logloss = evals_result['train']['multi_logloss']
-        eval_metric_acc = evals_result['eval']['accuracy']
-        train_metric_acc = evals_result['train']['accuracy']
-        _, ax1 = plt.subplots(figsize=(8, 4))
-        ax1.plot(eval_metric_logloss, label='eval logloss', c='r')
-        ax1.plot(train_metric_logloss, label='train logloss', c='b')
-        ax1.set_ylabel('logloss')
-        ax1.set_xlabel('rounds')
-        ax1.legend(loc='upper right')
-        ax2 = ax1.twinx()
-        ax2.plot(eval_metric_acc, label='eval accuracy', c='g')
-        ax2.plot(train_metric_acc, label='train accuracy', c='y')
-        ax2.set_ylabel('accuracy')
-        ax2.legend(loc='lower right')
-        plt.savefig(f'{DATA_DIR}/learning_{i}.png')
+        fig = lgb.plot_metric(evals_result, metric="multi_logloss")
+        plt.savefig(f"{DATA_DIR}/learning_curve_{i}.png")
 
         y_pred = np.argmax(model.predict(val_x), axis=1) # 0~8の確率
         acc = accuracy_score(val_y, y_pred)
@@ -230,7 +254,7 @@ def main():
     print(study.best_params)
     print("#################################")
     
-    submission_df.to_csv(f"{DATA_DIR}/my_submission17.csv", header=False)
+    submission_df.to_csv(f"{DATA_DIR}/my_submission31.csv", header=False)
 
 
 if __name__ == "__main__":

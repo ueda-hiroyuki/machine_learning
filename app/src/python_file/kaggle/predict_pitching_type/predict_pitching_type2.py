@@ -40,7 +40,6 @@ TRAIN_PITCH_PATH = f"{DATA_DIR}/train_pitch.csv"
 TRAIN_PLAYER_PATH = f"{DATA_DIR}/train_player.csv"
 TEST_PITCH_PATH = f"{DATA_DIR}/test_pitch.csv"
 TEST_PLAYER_PATH = f"{DATA_DIR}/test_player.csv"
-SUBMISSION_PATH = f"{DATA_DIR}/sample_submit_ball_type.csv"
 
 PITCH_REMOVAL_COLUMNS = ["日付", "時刻", "試合内連番", "成績対象打者ID", "成績対象投手ID", "打者試合内打席数", "試合ID"]
 PLAYER_REMOVAL_COLUMNS = ["出身高校名", "出身大学名", "生年月日", "出身地", "出身国", "チームID", "社会人","ドラフト年","ドラフト種別","ドラフト順位", "年俸", "育成選手F"]
@@ -89,7 +88,7 @@ def get_model(tr_dataset: t.Any, val_dataset: t.Any, params: t.Dict[str, t.Any])
         valid_sets=[val_dataset, tr_dataset],
         num_boost_round=500,
         learning_rates=lambda iter: 0.1 * (0.99 ** iter),
-        callbacks=[lgb.reset_parameter(bagging_fraction=[0.7] * 250 + [0.5] * 250)],
+        #callbacks=[lgb.reset_parameter(bagging_fraction=[0.7] * 250 + [0.5] * 250)],
         evals_result=evals_result,
     )
     return model, evals_result
@@ -134,7 +133,6 @@ def main():
     train_player = pd.read_csv(TRAIN_PLAYER_PATH)
     test_pitch = pd.read_csv(TEST_PITCH_PATH)
     test_player = pd.read_csv(TEST_PLAYER_PATH)
-    sub = pd.read_csv(SUBMISSION_PATH)
 
     train_pitch["use"] = "train"
     test_pitch["use"] = "test"
@@ -176,15 +174,15 @@ def main():
     best_feature_count = study.best_params['n_components']
     x_pca, train_y = get_important_features(train_x, train_y, best_feature_count)  
 
-    n_splits = 10
+    n_splits = 5
     num_class = 8
     best_params = get_best_params(x_pca, train_y, num_class) # 最適ハイパーパラメータの探索
 
     submission = np.zeros((len(test_x),num_class))
     accs = {}
 
-    tscv = TimeSeriesSplit(n_splits=n_splits)
-    for i, (tr_idx, val_idx) in enumerate(tscv.split(x_pca)):
+    skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=0)
+    for i, (tr_idx, val_idx) in enumerate(skf.split(x_pca, train_y)):
         tr_x = train_x.iloc[tr_idx].reset_index(drop=True)
         tr_y = train_y.iloc[tr_idx].reset_index(drop=True)
         val_x = train_x.iloc[val_idx].reset_index(drop=True)
@@ -215,7 +213,7 @@ def main():
     print(study.best_params)
     print("#################################")
     
-    submission_df.to_csv(f"{DATA_DIR}/my_submission28.csv", header=False)
+    submission_df.to_csv(f"{DATA_DIR}/my_submission29.csv", header=False)
 
 
 if __name__ == "__main__":
