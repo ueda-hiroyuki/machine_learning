@@ -36,6 +36,7 @@ test_player(25 columns)
 logging.basicConfig(level=logging.INFO)
 
 DATA_DIR = "src/sample_data/Kaggle/predict_pitching_type"
+EXTERNAL_DATA_DIR = f"{DATA_DIR}/external_data"
 TRAIN_PITCH_PATH = f"{DATA_DIR}/train_pitch.csv"
 TRAIN_PLAYER_PATH = f"{DATA_DIR}/train_player.csv"
 TEST_PITCH_PATH = f"{DATA_DIR}/test_pitch.csv"
@@ -97,7 +98,7 @@ def get_model(tr_dataset: t.Any, val_dataset: t.Any, num_class: int, best_params
         params=params,
         train_set=tr_dataset,
         valid_sets=[val_dataset, tr_dataset],
-        num_boost_round=1000
+        num_boost_round=1000,
         learning_rates=lambda iter: 0.1 * (0.99 ** iter),
         early_stopping_rounds=100,
         verbose_eval=50,
@@ -248,7 +249,6 @@ def main():
     print(submission_df)
     print(best_params) 
     print(accs)
-    print(study.best_params)
     print("#################################")
     
     submission_df.to_csv(f"{DATA_DIR}/my_submission31.csv", header=False)
