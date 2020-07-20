@@ -153,6 +153,20 @@ def objective(X, y, trial):
     f1 = f1_score(val_y, y_pred, average="micro")
     return f1
 
+def add_lag(df, lags=[1,2,3]):
+    for lag in lags:
+        df[f"lag_per_match_{lag}"] = df.groupby(["年度", "試合ID", "投手チームID", "投手ID"])["球種"].shift(lag)
+        df[f"lag_per_inning_{lag}"] = df.groupby(["年度", "試合ID", "投手チームID", "イニング", "投手ID"])["球種"].shift(lag)
+        df[f"lag_per_bat_{lag}"] = df.groupby(["年度", "試合ID", "投手チームID", "イニング", "イニング内打席数", "投手ID"])["球種"].shift(lag)
+    return df
+
+def add_trend(df, lags=[1,2,3]):
+    df["mean_per_match"] = df.groupby(["年度", "試合ID", "投手チームID", "投手ID"])["球種"].transform('mean')
+    df["mean_per_inning"] = df.groupby(["年度", "試合ID", "投手チームID", "イニング", "投手ID"])["球種"].transform('mean')
+    df["mean_per_bat"] = df.groupby(["年度", "試合ID", "投手チームID", "イニング", "イニング内打席数", "投手ID"])["球種"].transform('mean')
+
+    return df
+
 
 def get_best_params(train_x, train_y, valid_x, valid_y) -> t.Any:
     clf = lgb.LGBMClassifier(
@@ -283,6 +297,12 @@ def main():
         right_on=['年度','選手名', "投手チーム名"]
     ).drop(['選手名'], axis=1).fillna(0) # 今年から登板の投手のデータは0で置換する。
 
+    merged = add_trend(merged)
+
+    print(merged)
+    # merged = add_lag(merged)
+    
+
     # # データセットと前年度打者成績データをmergeする
     # batters_results = batters_results.replace({'チーム': {"DeNA": "ＤｅＮＡ"}})
     # batters_results = batters_results.rename(columns={"チーム": "打者チーム名", "選手名": "打者名"})
@@ -309,74 +329,74 @@ def main():
     #     on=['年度', '打者名', "打者チーム名"]
     # ).drop(["打者チーム名", "投手チーム名", "打者名", "投手名"], axis=1).fillna(0) # 昨年度のデータがない打者のデータは0で置換する。
 
-    date = merged.loc[:, "日付"]
-    usage = merged.loc[:, "use"]
-    labal = merged.loc[:, "球種"]
-    merged = merged.drop(["日付", "use", "位置", "球種"], axis=1)
+    # date = merged.loc[:, "日付"]
+    # usage = merged.loc[:, "use"]
+    # labal = merged.loc[:, "球種"]
+    # merged = merged.drop(["日付", "use", "位置", "球種"], axis=1)
 
-    merged = preprocessing(merged)
+    # merged = preprocessing(merged)
 
-    # category_encodersによってカテゴリ変数をencordingする
-    categorical_columns = [c for c in merged.columns if merged[c].dtype == 'object']
-    ce_oe = ce.OrdinalEncoder(cols=categorical_columns, handle_unknown='impute')
-    encorded = ce_oe.fit_transform(merged)
-    encorded = pd.concat([encorded, date, usage, labal], axis=1)
-    encorded = encorded.drop(FINAL_REMOVAL_COLUMNS, axis=1)
+    # # category_encodersによってカテゴリ変数をencordingする
+    # categorical_columns = [c for c in merged.columns if merged[c].dtype == 'object']
+    # ce_oe = ce.OrdinalEncoder(cols=categorical_columns, handle_unknown='impute')
+    # encorded = ce_oe.fit_transform(merged)
+    # encorded = pd.concat([encorded, date, usage, labal], axis=1)
+    # encorded = encorded.drop(FINAL_REMOVAL_COLUMNS, axis=1)
 
-    # cf.check_corr(encorded, "predict_pitching_type")
+    # # cf.check_corr(encorded, "predict_pitching_type")
 
 
-    param_train = encorded[(encorded["use"] == "train") & (encorded["日付"] < "2017-9-1")].drop(["use"], axis=1).reset_index(drop=True)
-    param_valid = encorded[(encorded["use"] == "train") & (encorded["日付"] >= "2017-9-1")].drop(["use"], axis=1).reset_index(drop=True)
+    # param_train = encorded[(encorded["use"] == "train") & (encorded["日付"] < "2017-9-1")].drop(["use"], axis=1).reset_index(drop=True)
+    # param_valid = encorded[(encorded["use"] == "train") & (encorded["日付"] >= "2017-9-1")].drop(["use"], axis=1).reset_index(drop=True)
+    # # test = encorded[(encorded["use"] == "test")].drop(["use","日付"], axis=1).reset_index(drop=True)
+
+    # train = encorded[(encorded["use"] == "train")].drop(["use","日付"], axis=1).reset_index(drop=True)
     # test = encorded[(encorded["use"] == "test")].drop(["use","日付"], axis=1).reset_index(drop=True)
 
-    train = encorded[(encorded["use"] == "train")].drop(["use","日付"], axis=1).reset_index(drop=True)
-    test = encorded[(encorded["use"] == "test")].drop(["use","日付"], axis=1).reset_index(drop=True)
+    # param_train_x = param_train.drop(["球種", "日付"], axis=1)
+    # param_train_y = param_train.loc[:,"球種"]
+    # param_valid_x = param_valid.drop(["球種", "日付"], axis=1)
+    # param_valid_y = param_valid.loc[:,"球種"]
 
-    param_train_x = param_train.drop(["球種", "日付"], axis=1)
-    param_train_y = param_train.loc[:,"球種"]
-    param_valid_x = param_valid.drop(["球種", "日付"], axis=1)
-    param_valid_y = param_valid.loc[:,"球種"]
+    # train_x = train.drop("球種", axis=1)
+    # train_y = train.loc[:,"球種"]
+    # test_x = test.drop("球種", axis=1)
 
-    train_x = train.drop("球種", axis=1)
-    train_y = train.loc[:,"球種"]
-    test_x = test.drop("球種", axis=1)
+    # # GridSearchによる最適パラメータの探索
+    # if not os.path.isfile(f"{DATA_DIR}/best_params.pkl"):
+    #     best_params = get_best_params(param_train_x, param_train_y, param_valid_x, param_valid_y)
+    #     joblib.dump(best_params, f"{DATA_DIR}/best_params.pkl")
+    # else:
+    #     best_params = joblib.load(f"{DATA_DIR}/best_params.pkl")
 
-    # GridSearchによる最適パラメータの探索
-    if not os.path.isfile(f"{DATA_DIR}/best_params.pkl"):
-        best_params = get_best_params(param_train_x, param_train_y, param_valid_x, param_valid_y)
-        joblib.dump(best_params, f"{DATA_DIR}/best_params.pkl")
-    else:
-        best_params = joblib.load(f"{DATA_DIR}/best_params.pkl")
-
-    n_splits = 3
-    submission = np.zeros((len(test_x),NUM_CLASS))
-    tscv = TimeSeriesSplit(n_splits=n_splits)
-    alphas = [1.02, 1.01, 0.99, 0.98]
-    weights = [1/len(alphas)] * len(alphas)
-    for  icount, (alpha, weight) in enumerate(zip(alphas, weights)):
-        preds = np.zeros((len(test_x),NUM_CLASS))
-        for i, (tr_idx, val_idx) in enumerate(tscv.split(train_x)):
-            tr_x = train_x.iloc[tr_idx].reset_index(drop=True)
-            tr_y = train_y.iloc[tr_idx].reset_index(drop=True)
-            val_x = train_x.iloc[val_idx].reset_index(drop=True)
-            val_y = train_y.iloc[val_idx].reset_index(drop=True)
-            model, evals_result = get_model(tr_x, tr_y, val_x, val_y, NUM_CLASS, best_params)
+    # n_splits = 3
+    # submission = np.zeros((len(test_x),NUM_CLASS))
+    # tscv = TimeSeriesSplit(n_splits=n_splits)
+    # alphas = [1.02, 1.01, 0.99, 0.98]
+    # weights = [1/len(alphas)] * len(alphas)
+    # for  icount, (alpha, weight) in enumerate(zip(alphas, weights)):
+    #     preds = np.zeros((len(test_x),NUM_CLASS))
+    #     for i, (tr_idx, val_idx) in enumerate(tscv.split(train_x)):
+    #         tr_x = train_x.iloc[tr_idx].reset_index(drop=True)
+    #         tr_y = train_y.iloc[tr_idx].reset_index(drop=True)
+    #         val_x = train_x.iloc[val_idx].reset_index(drop=True)
+    #         val_y = train_y.iloc[val_idx].reset_index(drop=True)
+    #         model, evals_result = get_model(tr_x, tr_y, val_x, val_y, NUM_CLASS, best_params)
             
-            # 学習曲線の描画
-            fig = lgb.plot_metric(evals_result, metric="multi_logloss")
-            plt.savefig(f"{DATA_DIR}/learning_curve_{icount}_{i}.png")
-            y_preda = alpha * model.predict(test_x, num_iteration=model.best_iteration) # 0~8の確率
-            preds += y_preda
+    #         # 学習曲線の描画
+    #         fig = lgb.plot_metric(evals_result, metric="multi_logloss")
+    #         plt.savefig(f"{DATA_DIR}/learning_curve_{icount}_{i}.png")
+    #         y_preda = alpha * model.predict(test_x, num_iteration=model.best_iteration) # 0~8の確率
+    #         preds += y_preda
 
-        submission += preds * weight
+    #     submission += preds * weight
 
-    submission_df = pd.DataFrame(submission/n_splits)
-    print("#################################")
-    print(submission_df)
-    print("#################################")
+    # submission_df = pd.DataFrame(submission/n_splits)
+    # print("#################################")
+    # print(submission_df)
+    # print("#################################")
 
-    submission_df.to_csv(f"{DATA_DIR}/my_submission30.csv", header=False)
+    # submission_df.to_csv(f"{DATA_DIR}/my_submission32.csv", header=False)
 
 
 

@@ -14,6 +14,7 @@ import optuna #ハイパーパラメータチューニング自動化ライブ�
 from optuna.integration import lightgbm_tuner #LightGBM用Stepwise Tuningに必要
 from sklearn.impute import SimpleImputer 
 from sklearn.decomposition import PCA
+from imblearn.over_sampling import SMOTE
 from functools import partial
 from python_file.kaggle.common import common_funcs as cf
 from sklearn.feature_selection import RFE
@@ -99,9 +100,10 @@ def get_model(tr_dataset: t.Any, val_dataset: t.Any, num_class: int, best_params
         train_set=tr_dataset,
         valid_sets=[val_dataset, tr_dataset],
         num_boost_round=1000,
-        learning_rates=lambda iter: 0.1 * (0.99 ** iter),
+        # learning_rates=lambda iter: 0.1 * (0.99 ** iter),
+        callbacks=[lgb.reset_parameter(learning_rate=[0.1] * 600 + [0.01] * 400)],
         early_stopping_rounds=100,
-        verbose_eval=50,
+        verbose_eval=10,
         evals_result=evals_result,
     )
     return model, evals_result
@@ -194,6 +196,24 @@ def main():
     train_y = train.loc[:,"球種"]
     test_x = test.drop("球種", axis=1)
 
+    print(train_y.value_counts())
+
+    sm = SMOTE(
+        ratio={
+            0:sum(train_y==0), 
+            1:sum(train_y==1)*3,
+            2:sum(train_y==2),
+            3:sum(train_y==3)*2,
+            4:sum(train_y==4)*2,
+            5:sum(train_y==5)*4,
+            6:sum(train_y==6)*20,
+            7:sum(train_y==7)*4
+        }
+    )
+    train_x_resampled, train_y_resampled = sm.fit_sample(train_x, train_y)
+    train_x_resampled = pd.DataFrame(train_x_resampled, columns=train_x.columns)
+    train_y_resampled = pd.Series(train_y_resampled, name="球種")
+
     # f = partial(objective, train_x, train_y) # 目的関数に引数を固定しておく
     # study = optuna.create_study(direction='maximize') # Optuna で取り出す特徴量の数を最適化する
 
@@ -221,12 +241,15 @@ def main():
     accs = {}
 
     gkf = GroupKFold(n_splits=5)
-    for i, (tr_idx, val_idx) in enumerate(gkf.split(train_x, train_y, groups=train_x["投手ID"])):
-        tr_x = train_x.iloc[tr_idx].reset_index(drop=True)
-        tr_y = train_y.iloc[tr_idx].reset_index(drop=True)
-        val_x = train_x.iloc[val_idx].reset_index(drop=True)
-        val_y = train_y.iloc[val_idx].reset_index(drop=True)
+    for i, (tr_idx, val_idx) in enumerate(gkf.split(train_x_resampled, train_y_resampled, groups=train_x_resampled["投手ID"])):
+        tr_x = train_x_resampled.iloc[tr_idx].reset_index(drop=True)
+        tr_y = train_y_resampled.iloc[tr_idx].reset_index(drop=True)
+        val_x = train_x_resampled.iloc[val_idx].reset_index(drop=True)
+        val_y = train_y_resampled.iloc[val_idx].reset_index(drop=True)
 
+        tr_weight = [
+
+        ]
         tr_dataset = lgb.Dataset(tr_x, tr_y, free_raw_data=False)
         val_dataset = lgb.Dataset(val_x, val_y, reference=tr_dataset, free_raw_data=False)
         model, evals_result = get_model(tr_dataset, val_dataset, num_class, best_params)
@@ -251,7 +274,7 @@ def main():
     print(accs)
     print("#################################")
     
-    submission_df.to_csv(f"{DATA_DIR}/my_submission31.csv", header=False)
+    submission_df.to_csv(f"{DATA_DIR}/my_submission33.csv", header=False)
 
 
 if __name__ == "__main__":
