@@ -61,7 +61,7 @@ HeapDict==1.0.1
 htmlmin==0.1.12
 idna==2.8
 imageio==2.8.0
-imbalanced-learn==0.6.2
+imbalanced-learn==0.3.0
 imgaug==0.2.6
 importlib-metadata==1.6.0
 ipykernel==5.2.1
