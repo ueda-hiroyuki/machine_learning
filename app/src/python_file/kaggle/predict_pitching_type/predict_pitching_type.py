@@ -18,7 +18,7 @@ from imblearn.over_sampling import SMOTE
 from functools import partial
 from python_file.kaggle.common import common_funcs as cf
 from sklearn.feature_selection import RFE
-from sklearn.model_selection import train_test_split, KFold, StratifiedKFold, cross_val_predict, GroupKFold
+from sklearn.model_selection import train_test_split, KFold, StratifiedKFold, TimeSeriesSplit, cross_val_predict, GroupKFold
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, LabelEncoder, OneHotEncoder
 from sklearn.metrics import mean_squared_error, r2_score, accuracy_score, roc_auc_score, precision_recall_curve, auc, f1_score
 
@@ -85,7 +85,7 @@ def get_best_params(train_x: t.Any, train_y: t.Any, num_class: int) -> t.Any:
     )
     return best_params
 
-def get_model(tr_dataset: t.Any, val_dataset: t.Any, num_class: int, best_params: t.Dict[str, t.Any]) -> t.Any:
+def get_model(tr_dataset: t.Any, val_dataset: t.Any, num_class: int, best_params: t.Dict[str, t.Any], cols: t.Sequence[str]) -> t.Any:
     evals_result = {}
     params = {
         'objective': 'multiclass',
@@ -101,11 +101,26 @@ def get_model(tr_dataset: t.Any, val_dataset: t.Any, num_class: int, best_params
         valid_sets=[val_dataset, tr_dataset],
         num_boost_round=1000,
         # learning_rates=lambda iter: 0.1 * (0.99 ** iter),
-        callbacks=[lgb.reset_parameter(learning_rate=[0.1] * 600 + [0.01] * 400)],
+        # callbacks=[lgb.reset_parameter(learning_rate=[0.1] * 1000)],
         early_stopping_rounds=100,
         verbose_eval=10,
         evals_result=evals_result,
     )
+    params['learning_rate'] = 0.05
+    model = lgb.train(
+        params=params,
+        train_set=tr_dataset,
+        valid_sets=[val_dataset, tr_dataset],
+        init_model=model,
+        num_boost_round=1000,
+        # learning_rates=lambda iter: 0.1 * (0.99 ** iter),
+        # callbacks=[lgb.reset_parameter(learning_rate=[0.1] * 1000)],
+        early_stopping_rounds=100,
+        verbose_eval=10,
+        evals_result=evals_result,
+    )
+    importance = pd.DataFrame(model.feature_importance(), index=cols, columns=['importance']).sort_values('importance', ascending=[False])
+    print(importance.head(50))
     return model, evals_result
 
 def objective(X, y, trial):
@@ -191,13 +206,11 @@ def main():
  
     train = encorded_data[encorded_data["use"] == "train"].drop("use", axis=1).reset_index(drop=True)
     test = encorded_data[encorded_data["use"] == "test"].drop("use", axis=1).reset_index(drop=True)
-
     train_x = train.drop("球種", axis=1)
     train_y = train.loc[:,"球種"]
     test_x = test.drop("球種", axis=1)
 
-    print(train_y.value_counts())
-
+    label_counts = train_y.value_counts()
     sm = SMOTE(
         ratio={
             0:sum(train_y==0), 
@@ -210,6 +223,7 @@ def main():
             7:sum(train_y==7)*4
         }
     )
+
     train_x_resampled, train_y_resampled = sm.fit_sample(train_x, train_y)
     train_x_resampled = pd.DataFrame(train_x_resampled, columns=train_x.columns)
     train_y_resampled = pd.Series(train_y_resampled, name="球種")
@@ -223,7 +237,7 @@ def main():
     best_feature_count = 47
     # x_pca, train_y = get_important_features(train_x, train_y, best_feature_count)  
 
-    n_splits = 5
+    n_splits = 10
     num_class = 8
     # best_params = get_best_params(x_pca, train_y, num_class) # 最適ハイパーパラメータの探索
 
@@ -234,25 +248,22 @@ def main():
         'feature_fraction': 0.75,
         'bagging_fraction': 0.89,
         'bagging_freq': 7,
-        #'min_child_sample': 100
+        'min_data_in_leaf': 200
     }
 
     submission = np.zeros((len(test_x),num_class))
     accs = {}
 
-    gkf = GroupKFold(n_splits=5)
-    for i, (tr_idx, val_idx) in enumerate(gkf.split(train_x_resampled, train_y_resampled, groups=train_x_resampled["投手ID"])):
+    tscv = TimeSeriesSplit(n_splits=n_splits)
+    for i, (tr_idx, val_idx) in enumerate(tscv.split(train_x_resampled)):
         tr_x = train_x_resampled.iloc[tr_idx].reset_index(drop=True)
         tr_y = train_y_resampled.iloc[tr_idx].reset_index(drop=True)
         val_x = train_x_resampled.iloc[val_idx].reset_index(drop=True)
         val_y = train_y_resampled.iloc[val_idx].reset_index(drop=True)
 
-        tr_weight = [
-
-        ]
         tr_dataset = lgb.Dataset(tr_x, tr_y, free_raw_data=False)
         val_dataset = lgb.Dataset(val_x, val_y, reference=tr_dataset, free_raw_data=False)
-        model, evals_result = get_model(tr_dataset, val_dataset, num_class, best_params)
+        model, evals_result = get_model(tr_dataset, val_dataset, num_class, best_params, train_x_resampled.columns)
         
         # 学習曲線の描画
         fig = lgb.plot_metric(evals_result, metric="multi_logloss")
@@ -274,7 +285,7 @@ def main():
     print(accs)
     print("#################################")
     
-    submission_df.to_csv(f"{DATA_DIR}/my_submission33.csv", header=False)
+    submission_df.to_csv(f"{DATA_DIR}/my_submission35.csv", header=False)
 
 
 if __name__ == "__main__":

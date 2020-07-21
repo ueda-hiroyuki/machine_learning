@@ -14,6 +14,7 @@ import matplotlib.pyplot as plt
 import category_encoders as ce # カテゴリ変数encording用ライブラリ
 import optuna #ハイパーパラメータチューニング自動化ライブラリ
 from optuna.integration import lightgbm_tuner #LightGBM用Stepwise Tuningに必要
+from sklearn.manifold import TSNE
 from sklearn.impute import SimpleImputer
 from sklearn.decomposition import PCA
 from functools import partial
@@ -117,6 +118,18 @@ def preprocessing(df):
     df = df.drop(["体重", "身長"], axis=1)
     return df
 
+def get_tsne_mapping(train, test):
+    print(train, test)
+    train = train.drop("日付", axis=1)
+    test = test.drop("日付", axis=1)
+    reduced_train = TSNE(n_components=2, random_state=0).fit_transform(train)
+    reduced_test = TSNE(n_components=2, random_state=0).fit_transform(test)
+    plt.figure()
+    plt.scatter(reduced_train[:, 0], reduced_train[:, 1], c='red', s=5, label="train")
+    plt.scatter(reduced_test[:, 0], reduced_test[:, 1], c='blue', s=5, label="test")
+    plt.legend()
+    plt.savefig(f'{DATA_DIR}/tsne_map.png')
+
 
 def get_selected_columns(train_x, train_y, n_splits):
     skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=1)
@@ -214,26 +227,13 @@ def main():
     test_pitching = pd.read_csv(TEST_PITCH_PATH, parse_dates=["日付"])
     test_player = pd.read_csv(TEST_PLAYER_PATH)
 
-    pitching_type_2016 = pd.read_csv(EXTERNAL_1_PATH)
-    pitching_type_2017 = pd.read_csv(EXTERNAL_2_PATH)
-    pitching_type_2018 = pd.read_csv(EXTERNAL_3_PATH)
-
-    pitchers_ability = pd.read_csv(EXTERNAL_4_PATH)
-    batters_ability = pd.read_csv(EXTERNAL_5_PATH)
-
-    pitchers_results = pd.read_csv(EXTERNAL_6_PATH).drop(["index"], axis=1)
-    batters_results = pd.read_csv(EXTERNAL_7_PATH).drop(["index"], axis=1)
-
     train_pitching["use"] = "train"
     test_pitching["use"] = "test"
     test_pitching["球種"] = 9999
     test_pitching["投球位置区域"] = 9999
 
-    # train_pitching = train_pitching.head(100) # メモリ節約のため
-    # test_pitching = test_pitching.head(100) # メモリ節約のため
-
-    # 2016~2018年の投手毎球種割合を結合
-    pitching_type_ratio = pd.concat([pitching_type_2016, pitching_type_2017, pitching_type_2018], axis=0).reset_index(drop=True)
+    train_pitching = train_pitching.head(10000) # メモリ節約のため
+    test_pitching = test_pitching.head(10000) # メモリ節約のため
 
     pitch_data = pd.concat([train_pitching, test_pitching], axis=0).drop(PITCH_REMOVAL_COLUMNS, axis=1).reset_index(drop=True)
 
@@ -249,137 +249,24 @@ def main():
     ).drop(['選手ID', '投球位置区域'], axis=1).fillna(0)
     merged = merged.rename(columns={"選手名": "投手名", "チーム名": "投手チーム名"})
 
-    # データセットと前年度投球球種割合をmergeする
-    merged = pd.merge(
-        merged,
-        pitching_type_ratio,
-        how="left",
-        left_on=['年度','投手ID', "投手名"],
-        right_on=['年度','選手ID', "選手名"]
-    ).drop(['選手ID', "選手名"], axis=1)
-
-    # データセットと前年度投手成績データをmergeする
-    pitchers_results = pitchers_results.replace({'チーム': {"DeNA": "ＤｅＮＡ"}})
-    pitchers_results = pitchers_results.rename(columns={"チーム": "投手チーム名"})
-    pitchers_results["年度"] = pitchers_results["年度"] + 1
-    pitchers_results = pitchers_results[pitchers_results["年度"] >= 2017]
-    replasce_cols = list(set(pitchers_results.columns) - set(["年度", "投手チーム名", "選手名"]))
-    for col in replasce_cols:
-        pitchers_results = pitchers_results.rename(columns={col: f'昨年度_投手_{col}'})
-
-    merged = pd.merge(
-        merged,
-        pitchers_results,
-        how="left",
-        left_on=['年度','投手名', "投手チーム名"],
-        right_on=['年度','選手名', "投手チーム名"]
-    ).drop(['選手名'], axis=1).fillna(0) # 今年から登板の投手のデータは0で置換する。
-
-    # データセットと前年度打者成績データをmergeする
-    batters_results = batters_results.replace({'チーム': {"DeNA": "ＤｅＮＡ"}})
-    batters_results = batters_results.rename(columns={"チーム": "打者チーム名", "選手名": "打者名"})
-    batters_results["年度"] = batters_results["年度"] + 1
-    batters_results = batters_results[batters_results["年度"] >= 2017].reset_index(drop=True)
-    replasce_cols = list(set(batters_results.columns) - set(["年度", "打者チーム名", "打者名"]))
-    for col in replasce_cols:
-        batters_results = batters_results.rename(columns={col: f'昨年度_打者_{col}'})
-
-    playersID = player_data[['年度', "選手ID", "選手名", "チーム名"]]
-    playersID = playersID.rename(columns={"チーム名": "打者チーム名", "選手名": "打者名"})
-    merged = pd.merge(
-        merged,
-        playersID,
-        how="left",
-        left_on=['年度', "打者ID"],
-        right_on=['年度', "選手ID"]
-    ).drop(['選手ID'], axis=1)
-    
-    merged = pd.merge(
-        merged,
-        batters_results,
-        how="left",
-        on=['年度', '打者名', "打者チーム名"]
-    ).drop(["打者チーム名", "投手チーム名", "打者名", "投手名"], axis=1).fillna(0) # 昨年度のデータがない打者のデータは0で置換する。
-
-    # aa = merged.isna().sum()
-    # for name, value in aa.items():
-    #     print(name, value)
-    # nan_df = merged[merged.isnull().any(axis=1)]
-    # print(nan_df[["年度","打者名"]].drop_duplicates(), nan_df.columns)
-    
-    date = merged.loc[:, "日付"]
-    usage = merged.loc[:, "use"]
-    labal = merged.loc[:, "球種"]
-    merged = merged.drop(["日付", "use", "位置", "球種"], axis=1)
-
-    merged = preprocessing(merged)
+    use = merged.loc[:, "use"]
+    merged = merged.drop(["use", "位置", "年度"], axis=1)
 
     # category_encodersによってカテゴリ変数をencordingする
     categorical_columns = [c for c in merged.columns if merged[c].dtype == 'object']
     ce_oe = ce.OrdinalEncoder(cols=categorical_columns, handle_unknown='impute')
-    encorded = ce_oe.fit_transform(merged) 
-    encorded = pd.concat([encorded, date, usage, labal], axis=1)
-    encorded = encorded.drop(FINAL_REMOVAL_COLUMNS, axis=1)
-
-    # cf.check_corr(encorded, "predict_pitching_type")
-
-
-    # train = encorded[(encorded["use"] == "train") & (encorded["日付"] < "2017-9-1")].drop(["use","日付"], axis=1).reset_index(drop=True)
-    # valid = encorded[(encorded["use"] == "train") & (encorded["日付"] >= "2017-9-1")].drop(["use","日付"], axis=1).reset_index(drop=True)
-    # test = encorded[(encorded["use"] == "test")].drop(["use","日付"], axis=1).reset_index(drop=True)
-
-    train = encorded[(encorded["use"] == "train")].drop(["use","日付"], axis=1).reset_index(drop=True)
-    test = encorded[(encorded["use"] == "test")].drop(["use","日付"], axis=1).reset_index(drop=True)
-
+    encorded_data = ce_oe.fit_transform(merged) 
+    encorded_data = pd.concat([encorded_data, use], axis=1)
+ 
+    train = encorded_data[encorded_data["use"] == "train"].drop("use", axis=1).reset_index(drop=True)
+    test = encorded_data[encorded_data["use"] == "test"].drop("use", axis=1).reset_index(drop=True)
     train_x = train.drop("球種", axis=1)
     train_y = train.loc[:,"球種"]
     test_x = test.drop("球種", axis=1)
+
+    get_tsne_mapping(train_x, test_x)
+
     
-    n_splits = 10
-    selected_columns = get_selected_columns(train_x, train_y, n_splits)
-    train_x_reduced = train_x.loc[:, selected_columns]
-    test_x_reduced = test_x.loc[:, selected_columns]
-    if not os.path.isfile(f"{DATA_DIR}/best_params.pkl"):
-        best_params = get_best_params(train_x_reduced, train_y, NUM_CLASS) # 最適ハイパーパラメータの探索
-        joblib.dump(best_params, f"{DATA_DIR}/best_params.pkl")
-    else:
-        best_params = joblib.load(f"{DATA_DIR}/best_params.pkl") 
-
-    submission = np.zeros((len(test_x_reduced),NUM_CLASS))
-    skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=1)
-    for i, (tr_idx, val_idx) in enumerate(skf.split(train_x_reduced, train_y)):
-        tr_x = train_x.iloc[tr_idx].reset_index(drop=True)
-        tr_y = train_y.iloc[tr_idx].reset_index(drop=True)
-        val_x = train_x.iloc[val_idx].reset_index(drop=True)
-        val_y = train_y.iloc[val_idx].reset_index(drop=True)
-        if not os.path.isfile(f"{DATA_DIR}/lgb_model{i}.pkl"):
-            model = get_model(tr_x, tr_y, val_x, val_y, NUM_CLASS, best_params)
-            joblib.dump(model, f"{DATA_DIR}/lgb_model{i}.pkl")
-        else:
-            model = joblib.load(f"{DATA_DIR}/lgb_model{i}.pkl") 
-
-        y_preda = model.predict(test_x_reduced, num_iteration=model.best_iteration) # 0~8の確率
-        submission += y_preda
-
-    submission_df = pd.DataFrame(submission/n_splits)
-    print("#################################")
-    print(submission_df)
-    print("#################################")
-
-    # if not os.path.isfile(f"{DATA_DIR}/lgb_model.pkl"):
-    #     # optunaでチューニング後のモデルを取得
-    #     gbm = get_model(train_x, train_y, valid_x, valid_y, NUM_CLASS)
-    #     joblib.dump(gbm, f"{DATA_DIR}/lgb_model.pkl")
-    # else:
-    #     gbm = joblib.load(f"{DATA_DIR}/lgb_model.pkl") 
-    
-    # y_pred = gbm.predict(test_x)
-    # submission = pd.DataFrame(y_pred)
-    # print("#################################")
-    # print(submission)
-    # print("#################################")
-    
-    submission_df.to_csv(f"{DATA_DIR}/my_submission25.csv", header=False)
 
 
 
