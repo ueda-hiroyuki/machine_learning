@@ -17,6 +17,7 @@ from optuna.integration import lightgbm_tuner #LightGBM用Stepwise Tuningに必�
 from sklearn.manifold import TSNE
 from sklearn.impute import SimpleImputer
 from sklearn.decomposition import PCA
+from imblearn.over_sampling import SMOTE
 from sklearn.ensemble import VotingClassifier, RandomForestClassifier
 from functools import partial
 from python_file.kaggle.common import common_funcs as cf
@@ -60,13 +61,6 @@ EXTERNAL_7_PATH = f"{EXTERNAL_DATA_DIR}/両リーグの2014～2018までの各�
 PITCH_REMOVAL_COLUMNS = ["試合ID", "時刻", "データ内連番", "試合内連番", "成績対象打者ID", "成績対象投手ID", "打者試合内打席数"]
 PLAYER_REMOVAL_COLUMNS = ["出身高校名", "出身大学名", "生年月日", "出身地", "出身国", "チームID", "社会人","ドラフト年","ドラフト種別","ドラフト順位", "年俸", "育成選手F"]
 
-estimators = [
-    ("lgbc1",lgb.LGBMClassifier(random_state=1)),
-    # ("lgbc2",lgb.LGBMClassifier(random_state=10)),
-    # ("lgbc3",lgb.LGBMClassifier(random_state=100)),
-    # ("lgbc4",lgb.LGBMClassifier(random_state=1000)),
-    # ("lgbc5",lgb.LGBMClassifier(random_state=10000))   
-]
 
 NUM_CLASS = 8
 
@@ -88,7 +82,7 @@ def gen_adversarital_data(train_x, test_x):
 
     # 要素が最初のデータセット由来なのか、次のデータセット由来なのか分類する
     clf = RandomForestClassifier(
-        n_estimators=10,
+        n_estimators=100,
         random_state=42
     )
 
@@ -97,53 +91,61 @@ def gen_adversarital_data(train_x, test_x):
         clf, 
         adv_data,
         adv_label,
-        cv=3, 
+        cv=5, 
         method='predict_proba'
     )
     preda_df = pd.DataFrame(z_pred_proba, columns=["train", "test"])
     adv_train = preda_df[:len(train_x)] # train側の予測確率を分離
     adv_test = preda_df[len(train_x):] # test側の予測確率を分離
-    print(adv_train)
     pred_train_idx = adv_train[adv_train["test"] > 0.6].index # trainデータの中でテストっぽいデータだと判断された行のindex
     return pred_train_idx
 
-
-
-def get_selected_columns(train_x, train_y, n_splits):
-    skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=1)
-    est = lgb.LGBMClassifier()
-    selector = RFECV(estimator=est, step=0.05, n_jobs=2, min_features_to_select=round(len(train_x)*0.8), cv=skf, verbose=10)
-    selector.fit(train_x, train_y)
-    selected_columns = train_x.columns[selector.support_]
-    return selected_columns
-
-
-def get_model(train_x, train_y, valid_x, valid_y, num_class, best_params) -> t.Any:
-    # 学習用データセット
-    train_set = lgb.Dataset(train_x, train_y)
-    # 評価用データセット
-    valid_set = lgb.Dataset(valid_x, valid_y)
-    # lgb_params = {
-    #     'objective': 'multiclass',
-    #     'metric': 'multi_logloss',
-    #     'boosting_type': 'gbdt',
-    #     'num_class': num_class,
-    #     'num_threads': 2,
-    #     'num_leaves' : 30,
-    #     'min_data_in_leaf': 20,
-    #     'learning_rate' : 0.1,
-    #     'feature_fraction' : 0.8,
-    # }
-    model = lgb.train(
-        params=best_params,
-        train_set=train_set,
-        valid_sets=[train_set, valid_set],
-        early_stopping_rounds=20,
-        num_boost_round=1000
+def gen_resampled_data(train_x, train_y):
+    label_counts = train_y.value_counts()
+    sm = SMOTE(
+        ratio={
+            0:sum(train_y==0)*int(round(label_counts[0]/label_counts[0])), 
+            1:sum(train_y==1)*int(round(label_counts[0]/label_counts[1])),
+            2:sum(train_y==2)*int(round(label_counts[0]/label_counts[2])),
+            3:sum(train_y==3)*int(round(label_counts[0]/label_counts[3])),
+            4:sum(train_y==4)*int(round(label_counts[0]/label_counts[4])),
+            5:sum(train_y==5)*int(round(label_counts[0]/label_counts[5])),
+            6:sum(train_y==6)*int(round(label_counts[0]/label_counts[6])),
+            7:sum(train_y==7)*int(round(label_counts[0]/label_counts[7]))
+        }
     )
-    importance = pd.DataFrame(model.feature_importance(), index=train_x.columns, columns=['importance']).sort_values('importance', ascending=[False])
+    train_x_resampled, train_y_resampled = sm.fit_sample(train_x, train_y)
+    train_x_resampled = pd.DataFrame(train_x_resampled, columns=train_x.columns)
+    train_y_resampled = pd.Series(train_y_resampled, name="球種")
+
+    return train_x_resampled, train_y_resampled
+
+
+def get_model(tr_dataset: t.Any, val_dataset: t.Any, num_class: int, best_params: t.Dict[str, t.Any], cols: t.Sequence[str]) -> t.Any:
+    evals_result = {}
+    params = {
+        'objective': 'multiclass',
+        'metric': 'multi_logloss',
+        'boosting_type': 'gbdt',
+        'learning_rate' : 0.05,
+        'num_class': num_class,
+        **best_params
+    }
+    model = lgb.train(
+        params=params,
+        train_set=tr_dataset,
+        valid_sets=[val_dataset, tr_dataset],
+        num_boost_round=1000,
+        # learning_rates=lambda iter: 0.1 * (0.99 ** iter),
+        # callbacks=[lgb.reset_parameter(learning_rate=[0.1] * 1000)],
+        early_stopping_rounds=50,
+        verbose_eval=10,
+        evals_result=evals_result,
+    )
+
+    importance = pd.DataFrame(model.feature_importance(), index=cols, columns=['importance']).sort_values('importance', ascending=[False])
     print(importance.head(50))
-    return model
+    return model, evals_result
 
 
 def main():
@@ -193,51 +195,76 @@ def main():
 
     adv_count = 3
     for i in range(adv_count):
+        print("###############################")
+        print(f"{i}th generate adversarial validation")
+        print("###############################")
         if i == 0:
             pred_train_idx = gen_adversarital_data(train_x, test_x)
             pred_train_x = train_x.iloc[pred_train_idx].reset_index(drop=True)
             pred_train_y = train_y.iloc[pred_train_idx].reset_index(drop=True)
-            #print(pred_train_x, pred_train_y)
         else:
             pred_train_idx = gen_adversarital_data(pred_train_x, test_x)
             pred_train_x = pred_train_x.iloc[pred_train_idx].reset_index(drop=True)
             pred_train_y = pred_train_y.iloc[pred_train_idx].reset_index(drop=True)
-            #print(pred_train_x, pred_train_y)
+    # print("######################################")
+    # print(pred_train_x, pred_train_y)
+    # print(pred_train_y.value_counts())
+
+    train_x_resampled, train_y_resampled = gen_resampled_data(pred_train_x, pred_train_y)
     print("######################################")
-    print(pred_train_x, pred_train_y)
+    print(train_x_resampled)
+    print(train_y_resampled.value_counts())
 
-    # 先に生成したデータに対応する部分だけ取り出す
-    # z_train_pred_proba = z_pred_proba[:2500]
+    n_splits = 5
+    num_class = 8
+    best_params = {
+        'lambda_l1': 5.96,
+        'lambda_l2': 1.1,
+        'num_leaves': 12,
+        'feature_fraction': 0.75,
+        'bagging_fraction': 0.89,
+        'bagging_freq': 7,
+        'min_data_in_leaf': 200
+    }
 
-    # skf = StratifiedKFold(n_splits=3, shuffle=True, random_state=42)
-    # adv_idx = []
-    # for fold, (train_idx, val_idx) in enumerate(skf.split(adv_data, adv_label)):
-    #     adv_train_x = adv_data.iloc[train_idx]
-    #     adv_valid_x = adv_data.iloc[val_idx]
-    #     adv_train_y = adv_label.iloc[train_idx]
-    #     adv_valid_y = adv_label.iloc[val_idx]
-    #     params = {
-    #         'objective': 'binary',
-    #         'max_depth': 5,
-    #         'boosting': 'gbdt',
-    #         'metric': 'auc'
-    #     }
-    #     train_set = lgb.Dataset(adv_train_x, label=adv_train_y)
-    #     model = lgb.train(params, train_set)
+    submission = np.zeros((len(test_x),num_class))
+    accs = {}
 
-    #     y_preda = model.predict(adv_valid_x)
-    #     preda_df = pd.Series(y_preda).sort_values(ascending=False)
-    #     print(preda_df[preda_df>0.8].index)
-    #     adv_idx += list(preda_df[preda_df>0.8].index) 
-    # adv_idx = list(set(adv_idx))
-    # print(min(adv_idx))
-    # print(max(adv_idx))
-    # print(len(adv_idx))
-    # print(len([i for i in adv_idx if i < len(train_x)]))
-    # print(len(train_x))
-    # # print([i for i in adv_idx if i < len(train_x)])
+    skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=0)
+    for i, (tr_idx, val_idx) in enumerate(skf.split(train_x_resampled, train_y_resampled)):
+        tr_x = train_x_resampled.iloc[tr_idx].reset_index(drop=True)
+        tr_y = train_y_resampled.iloc[tr_idx].reset_index(drop=True)
+        val_x = train_x_resampled.iloc[val_idx].reset_index(drop=True)
+        val_y = train_y_resampled.iloc[val_idx].reset_index(drop=True)
 
-    # print(train_x.iloc[adv_idx])
+        tr_dataset = lgb.Dataset(tr_x, tr_y, free_raw_data=False)
+        val_dataset = lgb.Dataset(val_x, val_y, reference=tr_dataset, free_raw_data=False)
+        model, evals_result = get_model(tr_dataset, val_dataset, num_class, best_params, train_x_resampled.columns)
+        
+        # 学習曲線の描画
+        fig = lgb.plot_metric(evals_result, metric="multi_logloss")
+        plt.savefig(f"{DATA_DIR}/learning_curve_{i}.png")
+
+        y_pred = np.argmax(model.predict(val_x), axis=1) # 0~8の確率
+        acc = accuracy_score(val_y, y_pred)
+        accs[i] = acc
+        print("#################################")
+        print(f"accuracy: {acc}")
+        print("#################################")
+        y_preda = model.predict(test_x, num_iteration=model.best_iteration) # 0~8の確率
+        submission += y_preda
+
+    submission_df = pd.DataFrame(submission/n_splits)
+    submission_df.to_csv(f"{DATA_DIR}/my_submission36.csv", header=False)
+    print("#################################")
+    print(submission_df)
+    print(best_params) 
+    print(accs)
+    print("#################################")
+
+
+    
+
 
 
 
