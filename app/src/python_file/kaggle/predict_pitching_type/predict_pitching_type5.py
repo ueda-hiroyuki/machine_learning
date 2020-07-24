@@ -82,7 +82,7 @@ def gen_adversarital_data(train_x, test_x):
 
     # 要素が最初のデータセット由来なのか、次のデータセット由来なのか分類する
     clf = RandomForestClassifier(
-        n_estimators=100,
+        n_estimators=200,
         random_state=42
     )
 
@@ -91,7 +91,7 @@ def gen_adversarital_data(train_x, test_x):
         clf, 
         adv_data,
         adv_label,
-        cv=5, 
+        cv=3, 
         method='predict_proba'
     )
     preda_df = pd.DataFrame(z_pred_proba, columns=["train", "test"])
@@ -121,31 +121,61 @@ def gen_resampled_data(train_x, train_y):
     return train_x_resampled, train_y_resampled
 
 
-def get_model(tr_dataset: t.Any, val_dataset: t.Any, num_class: int, best_params: t.Dict[str, t.Any], cols: t.Sequence[str]) -> t.Any:
-    evals_result = {}
-    params = {
-        'objective': 'multiclass',
-        'metric': 'multi_logloss',
-        'boosting_type': 'gbdt',
-        'learning_rate' : 0.05,
-        'num_class': num_class,
-        **best_params
-    }
-    model = lgb.train(
-        params=params,
-        train_set=tr_dataset,
-        valid_sets=[val_dataset, tr_dataset],
-        num_boost_round=1000,
-        # learning_rates=lambda iter: 0.1 * (0.99 ** iter),
-        # callbacks=[lgb.reset_parameter(learning_rate=[0.1] * 1000)],
-        early_stopping_rounds=50,
-        verbose_eval=10,
-        evals_result=evals_result,
+def get_balanced_weight_model(tr_x, tr_y, val_x, val_y, num_class, best_params):
+    gbm = lgb.LGBMClassifier(
+        objective="multiclass",
+        boosting_type='gbdt', 
+        learning_rate=0.05,
+        class_weight='balanced',
+        min_data_in_leaf=200,
+        random_state=1,
+        n_jobs=4,
+        n_estimators=1000, 
+        num_leaves=12,
+        feature_fraction = 0.75,
+        lambda_l1 = 5.96,
+        lambda_l2 = 1.1,
+        bagging_fraction= 0.89,
     )
-
-    importance = pd.DataFrame(model.feature_importance(), index=cols, columns=['importance']).sort_values('importance', ascending=[False])
+    model = gbm.fit(
+        tr_x, 
+        tr_y,
+        eval_set=[(tr_x, tr_y), (val_x, val_y)],
+        early_stopping_rounds=20,
+        verbose=10
+    )
+    importance = pd.DataFrame(model.feature_importances_, index=tr_x.columns, columns=['importance']).sort_values('importance', ascending=[False])
     print(importance.head(50))
-    return model, evals_result
+    return model
+
+
+# def get_model(tr_x, tr_y, val_x, val_y, num_class, best_params):
+#     train_set = lgb.Dataset(tr_x, tr_y, free_raw_data=False)
+#     valid_set = lgb.Dataset(val_x, val_y, reference=train_set, free_raw_data=False)
+#     evals_result = {}
+#     params = {
+#         'objective': 'multiclass',
+#         'metric': 'multi_logloss',
+#         'boosting_type': 'gbdt',
+#         'learning_rate' : 0.05,
+#         'num_class': num_class,
+#         **best_params
+#     }
+#     model = lgb.train(
+#         params=params,
+#         train_set=train_set,
+#         valid_sets=[valid_set, train_set],
+#         num_boost_round=100,
+#         # learning_rates=lambda iter: 0.1 * (0.99 ** iter),
+#         # callbacks=[lgb.reset_parameter(learning_rate=[0.1] * 1000)],
+#         early_stopping_rounds=50,
+#         verbose_eval=10,
+#         evals_result=evals_result,
+#     )
+
+#     importance = pd.DataFrame(model.feature_importance(), index=tr_x.columns, columns=['importance']).sort_values('importance', ascending=[False])
+#     print(importance.head(50))
+#     return model, evals_result
 
 
 def main():
@@ -193,24 +223,30 @@ def main():
     train_y = train.loc[:,"球種"]
     test_x = test.drop(["日付", "球種"], axis=1)
 
-    adv_count = 3
-    for i in range(adv_count):
-        print("###############################")
-        print(f"{i}th generate adversarial validation")
-        print("###############################")
-        if i == 0:
-            pred_train_idx = gen_adversarital_data(train_x, test_x)
-            pred_train_x = train_x.iloc[pred_train_idx].reset_index(drop=True)
-            pred_train_y = train_y.iloc[pred_train_idx].reset_index(drop=True)
-        else:
-            pred_train_idx = gen_adversarital_data(pred_train_x, test_x)
-            pred_train_x = pred_train_x.iloc[pred_train_idx].reset_index(drop=True)
-            pred_train_y = pred_train_y.iloc[pred_train_idx].reset_index(drop=True)
-    # print("######################################")
-    # print(pred_train_x, pred_train_y)
-    # print(pred_train_y.value_counts())
+    if not os.path.isfile(f"{DATA_DIR}/pred_train_x.pkl"):
+        adv_count = 3
+        for i in range(adv_count):
+            print("###############################")
+            print(f"{i}th generate adversarial validation")
+            print("###############################")
+            if i == 0:
+                pred_train_idx = gen_adversarital_data(train_x, test_x)
+                pred_train_x = train_x.iloc[pred_train_idx].reset_index(drop=True)
+                pred_train_y = train_y.iloc[pred_train_idx].reset_index(drop=True)
+            else:
+                pred_train_idx = gen_adversarital_data(pred_train_x, test_x)
+                pred_train_x = pred_train_x.iloc[pred_train_idx].reset_index(drop=True)
+                pred_train_y = pred_train_y.iloc[pred_train_idx].reset_index(drop=True)
+        joblib.dump(pred_train_x, f"{DATA_DIR}/pred_train_x.pkl")
+        joblib.dump(pred_train_y, f"{DATA_DIR}/pred_train_y.pkl")
+    else:
+        pred_train_x = joblib.load(f"{DATA_DIR}/pred_train_x.pkl")
+        pred_train_y = joblib.load(f"{DATA_DIR}/pred_train_y.pkl")
 
-    train_x_resampled, train_y_resampled = gen_resampled_data(pred_train_x, pred_train_y)
+
+
+    # train_x_resampled, train_y_resampled = gen_resampled_data(pred_train_x, pred_train_y)
+    train_x_resampled, train_y_resampled = pred_train_x, pred_train_y
     print("######################################")
     print(train_x_resampled)
     print(train_y_resampled.value_counts())
@@ -237,39 +273,38 @@ def main():
         val_x = train_x_resampled.iloc[val_idx].reset_index(drop=True)
         val_y = train_y_resampled.iloc[val_idx].reset_index(drop=True)
 
-        tr_dataset = lgb.Dataset(tr_x, tr_y, free_raw_data=False)
-        val_dataset = lgb.Dataset(val_x, val_y, reference=tr_dataset, free_raw_data=False)
-        model, evals_result = get_model(tr_dataset, val_dataset, num_class, best_params, train_x_resampled.columns)
+        # model, evals_result = get_model(tr_x, tr_y, val_x, val_y, num_class, best_params)
         
-        # 学習曲線の描画
-        fig = lgb.plot_metric(evals_result, metric="multi_logloss")
-        plt.savefig(f"{DATA_DIR}/learning_curve_{i}.png")
+        # # 学習曲線の描画
+        # fig = lgb.plot_metric(evals_result, metric="multi_logloss")
+        # plt.savefig(f"{DATA_DIR}/learning_curve_{i}.png")
 
-        y_pred = np.argmax(model.predict(val_x), axis=1) # 0~8の確率
+        # y_pred = np.argmax(model.predict(val_x), axis=1) # 0~8の確率
+        # acc = accuracy_score(val_y, y_pred)
+        # accs[i] = acc
+        # print("#################################")
+        # print(f"accuracy: {acc}")
+        # print("#################################")
+        # y_preda = model.predict(test_x, num_iteration=model.best_iteration) # 0~8の確率
+        
+        model = get_balanced_weight_model(tr_x, tr_y, val_x, val_y, num_class, best_params)
+        y_pred = model.predict(val_x) # 0~8の確率
         acc = accuracy_score(val_y, y_pred)
         accs[i] = acc
         print("#################################")
         print(f"accuracy: {acc}")
         print("#################################")
-        y_preda = model.predict(test_x, num_iteration=model.best_iteration) # 0~8の確率
+        y_preda = model.predict_proba(test_x, num_iteration=model.best_iteration_) # 0~8の確率
+        
         submission += y_preda
 
-    submission_df = pd.DataFrame(submission/n_splits)
-    submission_df.to_csv(f"{DATA_DIR}/my_submission36.csv", header=False)
+    submission_df = pd.DataFrame(submission)/n_splits
+    submission_df.to_csv(f"{DATA_DIR}/my_submission38.csv", header=False)
     print("#################################")
     print(submission_df)
     print(best_params) 
     print(accs)
     print("#################################")
-
-
-    
-
-
-
-
-        
-
 
 
 if __name__ == "__main__":

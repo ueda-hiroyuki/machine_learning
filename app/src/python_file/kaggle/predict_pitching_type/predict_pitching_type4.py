@@ -63,6 +63,18 @@ PLAYER_REMOVAL_COLUMNS = ["出身高校名", "出身大学名", "生年月日", 
 
 NUM_CLASS = 8
 
+FINAL_REMOVAL_COLUMNS = [
+    "試合ID",
+    "年度",
+    "イニング",
+    "ホームチームID",
+    "アウェイチームID",
+    "投",
+    "打",
+    "打席内投球数",
+    "投手役割",
+    "投手試合内対戦打者数"
+]
 
 def preprocessing(df):
     #df['走者'] = np.where(df["プレイ前走者状況"] == "___", 0, 1) # プレイ前ランナーがいるかいないか。
@@ -80,15 +92,18 @@ def gen_pseudo_data(train_x, train_y, test_x, n_splits, num_class, best_params):
         val_x = train_x.iloc[val_idx].reset_index(drop=True)
         val_y = train_y.iloc[val_idx].reset_index(drop=True)
 
-        model, evals_result = get_model(tr_x, tr_y, val_x, val_y, num_class, best_params)
-
-        y_preda = model.predict(test_x, num_iteration=model.best_iteration) # 0~8の確率
+        # model, evals_result = get_model(tr_x, tr_y, val_x, val_y, num_class, best_params)
+        # y_preda = model.predict(test_x, num_iteration=model.best_iteration) # 0~8の確率
+        model = get_balanced_weight_model(tr_x, tr_y, val_x, val_y, num_class, best_params)
+        y_preda = model.predict_proba(test_x, num_iteration=model.best_iteration_) # 0~8の確率
         pseudo += pd.DataFrame(y_preda)
+
     pseudo_data = pseudo / n_splits
-    mask = pseudo_data.max(axis=1) > 0.7
+    mask = pseudo_data.max(axis=1) > 0.8
     pseudo_label = pseudo_data[mask].idxmax(axis=1)
     pseudo_idx = list(pseudo_label.index)
 
+    print(pseudo_label.value_counts())
     print("####################################")
     # print(test_x)
     # print(test_x.iloc[pseudo_idx])
@@ -97,12 +112,16 @@ def gen_pseudo_data(train_x, train_y, test_x, n_splits, num_class, best_params):
     pseudo_train = test_x.iloc[pseudo_idx]
     pseudo_train["球種"] = pseudo_label
 
-    pseudo_train_x = pd.concat([train_x, pseudo_train.drop(["球種"], axis=1)], axis=0)
-    pseudo_train_y = pd.concat([train_y, pseudo_train.loc[:, "球種"]], axis=0)
+    pseudo_train_x = pd.concat([train_x, pseudo_train.drop(["球種"], axis=1)], axis=0).reset_index(drop=True)
+    pseudo_train_y = pd.concat([train_y, pseudo_train.loc[:, "球種"]], axis=0).reset_index(drop=True)
 
-    print(train_x, pseudo_train_x)
-    print(train_y.value_counts(), pseudo_train_y.value_counts())
-    return pseudo_train_x, pseudo_train_y
+    # print(train_x, pseudo_train_x)
+    # print(train_y.value_counts(), pseudo_train_y.value_counts())
+    
+    pseudo_train = pd.concat([pseudo_train_x, pseudo_train_y], axis=1).drop_duplicates(subset=pseudo_train_x.columns).reset_index(drop=True)
+    # print((pseudo_train.duplicated().value_counts())
+    # printpseudo_train)
+    return pseudo_train.drop(["球種"], axis=1), pseudo_train.loc[:, "球種"]
 
 
 
@@ -147,13 +166,40 @@ def get_model(tr_x, tr_y, val_x, val_y, num_class, best_params):
         # learning_rates=lambda iter: 0.1 * (0.99 ** iter),
         # callbacks=[lgb.reset_parameter(learning_rate=[0.1] * 1000)],
         early_stopping_rounds=50,
-        verbose_eval=10,
+        verbose_eval=20,
         evals_result=evals_result,
     )
 
     importance = pd.DataFrame(model.feature_importance(), index=tr_x.columns, columns=['importance']).sort_values('importance', ascending=[False])
     print(importance.head(50))
     return model, evals_result
+
+def get_balanced_weight_model(tr_x, tr_y, val_x, val_y, num_class, best_params):
+    gbm = lgb.LGBMClassifier(
+        objective="multiclass",
+        boosting_type='gbdt',
+        n_estimators=10000, 
+        learning_rate=0.1,
+        class_weight='balanced',
+        min_data_in_leaf=200,
+        random_state=1,
+        n_jobs=4, 
+        num_leaves=12,
+        feature_fraction = 0.75,
+        lambda_l1 = 5.96,
+        lambda_l2 = 1.1,
+        bagging_fraction= 0.89,
+    )
+    model = gbm.fit(
+        tr_x, 
+        tr_y,
+        eval_set=[(tr_x, tr_y), (val_x, val_y)],
+        early_stopping_rounds=20,
+        verbose=20
+    )
+    importance = pd.DataFrame(model.feature_importances_, index=tr_x.columns, columns=['importance']).sort_values('importance', ascending=[False])
+    # print(importance.head(50))
+    return model
 
 
 def main():
@@ -162,6 +208,10 @@ def main():
     test_pitching = pd.read_csv(TEST_PITCH_PATH, parse_dates=["日付"])
     test_player = pd.read_csv(TEST_PLAYER_PATH)
 
+    pitching_type_2016 = pd.read_csv(EXTERNAL_1_PATH)
+    pitching_type_2017 = pd.read_csv(EXTERNAL_2_PATH)
+    pitching_type_2018 = pd.read_csv(EXTERNAL_3_PATH)
+
     train_pitching["use"] = "train"
     test_pitching["use"] = "test"
     test_pitching["球種"] = 9999
@@ -169,6 +219,9 @@ def main():
 
     # train_pitching = train_pitching.head(10000) # メモリ節約のため
     # test_pitching = test_pitching.head(10000) # メモリ節約のため
+
+    # 2016~2018年の投手毎球種割合を結合
+    pitching_type_ratio = pd.concat([pitching_type_2016, pitching_type_2017, pitching_type_2018], axis=0).reset_index(drop=True)
 
     pitch_data = pd.concat([train_pitching, test_pitching], axis=0).drop(PITCH_REMOVAL_COLUMNS, axis=1).reset_index(drop=True)
 
@@ -184,8 +237,17 @@ def main():
     ).drop(['選手ID', '投球位置区域'], axis=1).fillna(0)
     merged = merged.rename(columns={"選手名": "投手名", "チーム名": "投手チーム名"})
 
+    # データセットと前年度投球球種割合をmergeする
+    merged = pd.merge(
+        merged,
+        pitching_type_ratio,
+        how="left",
+        left_on=['年度','投手ID', "投手名"],
+        right_on=['年度','選手ID', "選手名"]
+    ).drop(['選手ID', "選手名"], axis=1)
+
     use = merged.loc[:, "use"]
-    merged = merged.drop(["use", "位置", "年度"], axis=1)
+    merged = merged.drop(["use", "位置", "年度", "投手名"], axis=1)
 
     merged = preprocessing(merged)
 
@@ -201,8 +263,8 @@ def main():
     train_y = train.loc[:,"球種"]
     test_x = test.drop(["日付", "球種"], axis=1)
 
-    train_x_resampled, train_y_resampled = gen_resampled_data(train_x, train_y)
-    # train_x_resampled, train_y_resampled = train_x, train_y
+    # train_x_resampled, train_y_resampled = gen_resampled_data(train_x, train_y)
+    train_x_resampled, train_y_resampled = train_x, train_y
 
     n_splits = 3
     num_class = 8
@@ -224,6 +286,7 @@ def main():
             pseudo_train_x, pseudo_train_y = gen_pseudo_data(pseudo_train_x, pseudo_train_y, test_x, n_splits, num_class, best_params)
     
     submission = np.zeros((len(test_x),num_class))
+    n_splits = 5
 
     skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=0)
     for i, (tr_idx, val_idx) in enumerate(skf.split(pseudo_train_x, pseudo_train_y)):
@@ -232,16 +295,19 @@ def main():
         val_x = pseudo_train_x.iloc[val_idx].reset_index(drop=True)
         val_y = pseudo_train_y.iloc[val_idx].reset_index(drop=True)
 
-        model, evals_result = get_model(tr_x, tr_y, val_x, val_y, num_class, best_params)
-        # 学習曲線の描画
-        fig = lgb.plot_metric(evals_result, metric="multi_logloss")
-        plt.savefig(f"{DATA_DIR}/learning_curve_{i}.png")
+        # model, evals_result = get_model(tr_x, tr_y, val_x, val_y, num_class, best_params)
+        # # 学習曲線の描画
+        # fig = lgb.plot_metric(evals_result, metric="multi_logloss")
+        # plt.savefig(f"{DATA_DIR}/learning_curve_{i}.png")
+        # y_preda = model.predict(test_x, num_iteration=model.best_iteration) # 0~8の確率
 
-        y_preda = model.predict(test_x, num_iteration=model.best_iteration) # 0~8の確率
+        model = get_balanced_weight_model(tr_x, tr_y, val_x, val_y, num_class, best_params)
+        y_preda = model.predict_proba(test_x, num_iteration=model.best_iteration_) # 0~8の確率
+        
         submission += y_preda
 
-    submission_df = pd.DataFrame(submission/n_splits)
-    submission_df.to_csv(f"{DATA_DIR}/my_submission38.csv", header=False)
+    submission_df = pd.DataFrame(submission)/n_splits
+    submission_df.to_csv(f"{DATA_DIR}/my_submission41.csv", header=False)
     print("#################################")
     print(submission_df)
     print(best_params) 
