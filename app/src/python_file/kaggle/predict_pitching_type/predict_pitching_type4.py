@@ -99,7 +99,7 @@ def gen_pseudo_data(train_x, train_y, test_x, n_splits, num_class, best_params):
         pseudo += pd.DataFrame(y_preda)
 
     pseudo_data = pseudo / n_splits
-    mask = pseudo_data.max(axis=1) > 0.8
+    mask = pseudo_data.max(axis=1) > 0.9
     pseudo_label = pseudo_data[mask].idxmax(axis=1)
     pseudo_idx = list(pseudo_label.index)
 
@@ -178,7 +178,7 @@ def get_balanced_weight_model(tr_x, tr_y, val_x, val_y, num_class, best_params):
     gbm = lgb.LGBMClassifier(
         objective="multiclass",
         boosting_type='gbdt',
-        n_estimators=10000, 
+        n_estimators=1000, 
         learning_rate=0.1,
         class_weight='balanced',
         min_data_in_leaf=200,
@@ -198,7 +198,7 @@ def get_balanced_weight_model(tr_x, tr_y, val_x, val_y, num_class, best_params):
         verbose=20
     )
     importance = pd.DataFrame(model.feature_importances_, index=tr_x.columns, columns=['importance']).sort_values('importance', ascending=[False])
-    # print(importance.head(50))
+    print(importance.head(50))
     return model
 
 

@@ -1,5 +1,7 @@
 import gc
+import os
 import logging
+import joblib
 import collections
 import typing as t
 import pandas as pd
@@ -12,22 +14,19 @@ import matplotlib.pyplot as plt
 import category_encoders as ce # カテゴリ変数encording用ライブラリ
 import optuna #ハイパーパラメータチューニング自動化ライブラリ
 from optuna.integration import lightgbm_tuner #LightGBM用Stepwise Tuningに必要
-from sklearn.impute import SimpleImputer 
-from functools import partial
-from sklearn.pipeline import Pipeline
+from sklearn.manifold import TSNE
+from sklearn.impute import SimpleImputer
 from sklearn.decomposition import PCA
-from python_file.kaggle.common import common_funcs as cf
-from sklearn.feature_selection import RFE
-from sklearn.model_selection import train_test_split, KFold, StratifiedKFold, cross_val_predict, GridSearchCV
-from sklearn.preprocessing import StandardScaler, MinMaxScaler, LabelEncoder, OneHotEncoder
-from sklearn.metrics import mean_squared_error, r2_score, accuracy_score, roc_auc_score, precision_recall_curve, auc, f1_score
-from sklearn.neighbors import KNeighborsClassifier
-from sklearn.linear_model import LogisticRegression
-from sklearn.tree import DecisionTreeClassifier
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, AdaBoostClassifier
-from sklearn.svm import SVC, LinearSVC
-from sklearn.naive_bayes import GaussianNB
 from sklearn.neural_network import MLPClassifier
+from sklearn.ensemble import VotingClassifier, RandomForestClassifier
+from functools import partial
+from python_file.kaggle.common import common_funcs as cf
+from sklearn.feature_selection import RFECV, RFE
+from sklearn.model_selection import train_test_split, GroupKFold, StratifiedKFold, cross_val_predict, TimeSeriesSplit
+from sklearn.preprocessing import StandardScaler, MinMaxScaler, LabelEncoder, OneHotEncoder
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor 
+from sklearn.metrics import mean_squared_error, r2_score, accuracy_score, roc_auc_score, precision_recall_curve, auc, f1_score
+
 
 """
 train_pitch(51 columns)
@@ -42,150 +41,236 @@ test_player(25 columns)
 
 logging.basicConfig(level=logging.INFO)
 
+
 DATA_DIR = "src/sample_data/Kaggle/predict_pitching_type"
+EXTERNAL_DATA_DIR = f"{DATA_DIR}/external_data"
 TRAIN_PITCH_PATH = f"{DATA_DIR}/train_pitch.csv"
 TRAIN_PLAYER_PATH = f"{DATA_DIR}/train_player.csv"
 TEST_PITCH_PATH = f"{DATA_DIR}/test_pitch.csv"
 TEST_PLAYER_PATH = f"{DATA_DIR}/test_player.csv"
+SUBMISSION_PATH = f"{DATA_DIR}/sample_submit_ball_type.csv"
+EXTERNAL_1_PATH = f"{EXTERNAL_DATA_DIR}/2017登録投手の昨年球種配分.csv"
+EXTERNAL_2_PATH = f"{EXTERNAL_DATA_DIR}/2018登録投手の昨年球種配分.csv"
+EXTERNAL_3_PATH = f"{EXTERNAL_DATA_DIR}/2019登録投手の昨年球種配分.csv"
+EXTERNAL_4_PATH = f"{EXTERNAL_DATA_DIR}/パワプロ2016-2018の投手能力.csv"
+EXTERNAL_5_PATH = f"{EXTERNAL_DATA_DIR}/パワプロ2016-2018の野手能力.csv"
+EXTERNAL_6_PATH = f"{EXTERNAL_DATA_DIR}/両リーグの2014～2018までの各投手の年間成績データ.csv"
+EXTERNAL_7_PATH = f"{EXTERNAL_DATA_DIR}/両リーグの2014～2018までの各打者の年間成績データ.csv"
 
-PITCH_REMOVAL_COLUMNS = ["データ内連番", "成績対象打者ID", "成績対象投手ID", "打者試合内打席数"]
+
+PITCH_REMOVAL_COLUMNS = ["試合ID", "時刻", "データ内連番", "試合内連番", "成績対象打者ID", "成績対象投手ID", "打者試合内打席数"]
 PLAYER_REMOVAL_COLUMNS = ["出身高校名", "出身大学名", "生年月日", "出身地", "出身国", "チームID", "社会人","ドラフト年","ドラフト種別","ドラフト順位", "年俸", "育成選手F"]
 
 NUM_CLASS = 8
 
-def get_best_params(train_x: t.Any, train_y: t.Any, num_class: int) -> t.Any:
-    tr_x, val_x, tr_y, val_y = train_test_split(train_x, train_y, test_size=0.2, random_state=1)
-    lgb_train = lgb.Dataset(tr_x, tr_y)
-    lgb_eval = lgb.Dataset(val_x, val_y)
-    best_params = {}
-    params = {
-        'objective': 'multiclass',
-        'metric': 'multi_logloss',
-        'boosting_type': 'gbdt', 
-        'num_class': num_class,
-    }
-    best_params = {}
-    tuning_history = []
-    gbm = lightgbm_tuner.train(
-        params,
-        lgb_train,
-        valid_sets=lgb_eval,
-        num_boost_round=10000,
-        early_stopping_rounds=20,
-        verbose_eval=10,
-        best_params=best_params,
-        tuning_history=tuning_history
+HIDDEN_LAYERS = [
+    (100,), 
+    (100, 20), 
+    (100, 100, 20), 
+    (100, 100, 100, 20),
+    (100, 100, 100, 100, 20),
+    (100, 100, 100, 100, 100, 20),
+    (100, 100, 100, 100, 100, 100, 100, 20)
+]
+
+FINAL_REMOVAL_COLUMNS = [
+    "試合ID",
+    "年度",
+    "イニング",
+    "ホームチームID",
+    "アウェイチームID",
+    "投",
+    "打",
+    "打席内投球数",
+    "投手役割",
+    "投手試合内対戦打者数"
+]
+
+def preprocessing(df):
+    #df['走者'] = np.where(df["プレイ前走者状況"] == "___", 0, 1) # プレイ前ランナーがいるかいないか。
+    df['BMI'] = (df["体重"]/(df["身長"]/100)**2) # 身長体重をBMIに変換
+    df = df.drop(["体重", "身長"], axis=1)
+    return df
+
+# pseudo_labeling
+def gen_pseudo_data(train_x, train_y, test_x, n_splits, num_class, best_params):
+    pseudo = np.zeros((len(test_x),num_class))
+    gkf = GroupKFold(n_splits=n_splits)
+    skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=0)
+    for i, (tr_idx, val_idx) in enumerate(skf.split(train_x, train_y)):
+        tr_x = train_x.iloc[tr_idx].reset_index(drop=True)
+        tr_y = train_y.iloc[tr_idx].reset_index(drop=True)
+
+        model = get_model(tr_x, tr_y)
+        y_preda = model.predict_proba(test_x)
+
+        pseudo += pd.DataFrame(y_preda)
+
+    pseudo_data = pseudo / n_splits
+    mask = pseudo_data.max(axis=1) > 0.8
+    pseudo_label = pseudo_data[mask].idxmax(axis=1)
+    pseudo_idx = list(pseudo_label.index)
+
+    print(pseudo_label.value_counts())
+    print("####################################")
+    # print(test_x)
+    # print(test_x.iloc[pseudo_idx])
+    # print(pseudo_label.value_counts())
+
+    pseudo_train = test_x.iloc[pseudo_idx]
+    pseudo_train["球種"] = pseudo_label
+
+    pseudo_train_x = pd.concat([train_x, pseudo_train.drop(["球種"], axis=1)], axis=0).reset_index(drop=True)
+    pseudo_train_y = pd.concat([train_y, pseudo_train.loc[:, "球種"]], axis=0).reset_index(drop=True)
+
+    # print(train_x, pseudo_train_x)
+    # print(train_y.value_counts(), pseudo_train_y.value_counts())
+    
+    pseudo_train = pd.concat([pseudo_train_x, pseudo_train_y], axis=1).drop_duplicates(subset=pseudo_train_x.columns).reset_index(drop=True)
+    # print((pseudo_train.duplicated().value_counts())
+    # printpseudo_train)
+    return pseudo_train.drop(["球種"], axis=1), pseudo_train.loc[:, "球種"]
+
+
+def get_model(tr_x, tr_y):
+    model = MLPClassifier(
+        activation='relu', 
+        batch_size='auto', 
+        early_stopping=True, 
+        epsilon=1e-08,
+        hidden_layer_sizes=(100,100,100,100,100), 
+        learning_rate='constant',
+        learning_rate_init=0.05, 
+        max_iter=100, 
+        momentum=0.9,
+        n_iter_no_change=10,
+        random_state=1, 
+        shuffle=True, 
+        solver='sgd', 
+        verbose=10,
     )
-    return best_params
+    model.fit(tr_x, tr_y)
+    return model
 
-def get_model(tr_dataset: t.Any, val_dataset: t.Any, params: t.Dict[str, t.Any]) -> t.Any:
-    model = lgb.train(
-        params=params,
-        train_set=tr_dataset,
-        valid_sets=[val_dataset, tr_dataset],
-        early_stopping_rounds=20,
-        num_boost_round=10000,
+def get_NN_model(tr_x, tr_y, hidden_layer_sizes):
+    model = MLPClassifier(
+        activation='relu',
+        solver='sgd',   
+        hidden_layer_sizes=hidden_layer_sizes, 
+        max_iter=100, 
+        momentum=0.9,
+        random_state=1,
+        learning_rate_init=0.1,
+        n_iter_no_change=10,
+        verbose=10,
     )
-    return model_selection
-
-def objective(X, y, trial):
-    """最適化する目的関数"""
-    gbm = lgb.LGBMClassifier(
-        objective="multiclass",
-        boosting_type= 'gbdt', 
-        #n_jobs = 4,
-        n_estimators=10000,
-    )
-    n_components = trial.suggest_int('n_components', 1, len(list(X.columns))),
-    pca = PCA(n_components=n_components[0]).fit(X)
-    x_pca = pca.transform(X)
-    tr_x, val_x, tr_y, val_y = train_test_split(x_pca, y, random_state=1)
-    gbm.fit(
-        tr_x, 
-        tr_y,
-        eval_set=[(val_x, val_y)],
-        early_stopping_rounds=20,
-        verbose=50
-    )
-    y_pred = gbm.predict(val_x)
-    accuracy = accuracy_score(val_y, y_pred)
-    return accuracy
-
-def get_selected_columns(train_x, train_y):
-    skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=1)
-    est = lgb.LGBMClassifier()
-    selector = RFECV(estimator=est, step=0.05, n_jobs=1, min_features_to_select=round(len(train_x)*0.5), cv=skf, verbose=10)
-    selector.fit(train_x, train_y)
-    selected_columns = train_x.columns[selector.support_]
-    return selected_columns
-
-
-def get_important_features(train_x: t.Any, train_y: t.Any, best_feature_count: int):
-    pca = PCA(n_components=best_feature_count).fit(train_x)
-    x_pca = pca.transform(train_x)
-    return x_pca, train_y
-
+    model.fit(tr_x, tr_y)
+    return model
 
 
 def main():
-    """
-    << 処理の流れ >>
-    データ読み込み ⇒ 投球データと選手データの結合(train,testも結合) ⇒ nanの置換 ⇒ カテゴリ変数の変換 ⇒
-    RFEによる特徴量選択(個数の最適化) ⇒ ハイパーパラメータの最適化 ⇒ 交差検証
-    """
-
-    train_pitch = pd.read_csv(TRAIN_PITCH_PATH)
+    train_pitching = pd.read_csv(TRAIN_PITCH_PATH, parse_dates=["日付"])
     train_player = pd.read_csv(TRAIN_PLAYER_PATH)
-    test_pitch = pd.read_csv(TEST_PITCH_PATH)
+    test_pitching = pd.read_csv(TEST_PITCH_PATH, parse_dates=["日付"])
     test_player = pd.read_csv(TEST_PLAYER_PATH)
 
-    train_pitch["use"] = "train"
-    test_pitch["use"] = "test"
-    test_pitch["球種"] = 0
-    pitch_data = pd.concat([train_pitch, test_pitch], axis=0).drop(PITCH_REMOVAL_COLUMNS, axis=1)
+    pitching_type_2016 = pd.read_csv(EXTERNAL_1_PATH)
+    pitching_type_2017 = pd.read_csv(EXTERNAL_2_PATH)
+    pitching_type_2018 = pd.read_csv(EXTERNAL_3_PATH)
 
-    player_data = pd.concat([train_player, test_player], axis=0).drop(PLAYER_REMOVAL_COLUMNS, axis=1) #.fillna(0)
+    train_pitching["use"] = "train"
+    test_pitching["use"] = "test"
+    test_pitching["球種"] = 9999
+    test_pitching["投球位置区域"] = 9999
+
+    # train_pitching = train_pitching.head(10000) # メモリ節約のため
+    # test_pitching = test_pitching.head(10000) # メモリ節約のため
+
+    # 2016~2018年の投手毎球種割合を結合
+    pitching_type_ratio = pd.concat([pitching_type_2016, pitching_type_2017, pitching_type_2018], axis=0).reset_index(drop=True)
+
+    pitch_data = pd.concat([train_pitching, test_pitching], axis=0).drop(PITCH_REMOVAL_COLUMNS, axis=1).reset_index(drop=True)
+
+    player_data = pd.concat([train_player, test_player], axis=0).drop(PLAYER_REMOVAL_COLUMNS, axis=1).reset_index(drop=True) #.fillna(0)
     pitchers_data = train_player[train_player["位置"] == "投手"].drop(PLAYER_REMOVAL_COLUMNS, axis=1)
 
-    merged_data = pd.merge(
-        pitch_data, 
-        player_data, 
-        how="left", 
-        left_on=['年度','投手ID'], 
+    merged = pd.merge(
+        pitch_data,
+        player_data,
+        how="left",
+        left_on=['年度','投手ID'],
         right_on=['年度','選手ID'],
     ).drop(['選手ID', '投球位置区域'], axis=1).fillna(0)
+    merged = merged.rename(columns={"選手名": "投手名", "チーム名": "投手チーム名"})
 
-    use = merged_data.loc[:, "use"]
-    labal = merged_data.loc[:, "球種"]
-    merged_data = merged_data.drop(["use", "位置", "球種"], axis=1)
+    # データセットと前年度投球球種割合をmergeする
+    merged = pd.merge(
+        merged,
+        pitching_type_ratio,
+        how="left",
+        left_on=['年度','投手ID', "投手名"],
+        right_on=['年度','選手ID', "選手名"]
+    ).drop(['選手ID', "選手名"], axis=1)
 
-    categorical_columns = [c for c in merged_data.columns if merged_data[c].dtype == 'object']
-    ce_oe = ce.OrdinalEncoder(cols=categorical_columns, handle_unknown='impute') 
-    encorded_data = ce_oe.fit_transform(merged_data) 
-    encorded_data = pd.concat([encorded_data, use, labal], axis=1)
+    use = merged.loc[:, "use"]
+    label = merged.loc[:, "球種"]
+    merged = merged.drop(["use", "球種", "位置", "年度", "投手名", "日付"], axis=1)
 
-    encorded_data = encorded_data[encorded_data["試合ID"] == 2017033101] # 
+    merged = preprocessing(merged)
 
-    lags = [1,2,3]
-    lag_cols = [f"lag_{lag}" for lag in lags]
-    for lag, lag_col in zip(lags, lag_cols):
-        encorded_data[lag_col] = 0
+    # category_encodersによってカテゴリ変数をencordingする
+    categorical_columns = [c for c in merged.columns if merged[c].dtype == 'object']
+    ce_oe = ce.OrdinalEncoder(cols=categorical_columns, handle_unknown='impute')
+    encorded_data = ce_oe.fit_transform(merged) 
+    encorded_data = cf.standardize(encorded_data)
 
-
-    print(encorded_data.info())
-
-
+    encorded_data = pd.concat([encorded_data, use, label], axis=1)
+    print(encorded_data)
  
-    # train = encorded_data[encorded_data["use"] == "train"].drop("use", axis=1).reset_index(drop=True)
-    # test = encorded_data[encorded_data["use"] == "test"].drop("use", axis=1).reset_index(drop=True)
+    train = encorded_data[encorded_data["use"] == "train"].drop("use", axis=1).reset_index(drop=True)
+    test = encorded_data[encorded_data["use"] == "test"].drop("use", axis=1).reset_index(drop=True)
+    train_x = train.drop(["球種"], axis=1)
+    train_y = train.loc[:,"球種"]
+    test_x = test.drop(["球種"], axis=1)
 
-    # train_x = train.drop("球種", axis=1)
-    # train_y = train.loc[:,"球種"]
-    # test_x = test.drop("球種", axis=1)
+    # train_x_resampled, train_y_resampled = gen_resampled_data(train_x, train_y)
+    pseudo_train_x, pseudo_train_y = train_x, train_y
 
-    # print(train_x.columns, train_x)
+    n_splits = 3
+    num_class = 8
 
+    # pseudo_counts = 3
+    # for i in range(pseudo_counts):
+    #     if i == 0:
+    #         pseudo_train_x, pseudo_train_y = gen_pseudo_data(train_x_resampled, train_y_resampled, test_x, n_splits, num_class, best_params)
+    #     else:
+    #         pseudo_train_x, pseudo_train_y = gen_pseudo_data(pseudo_train_x, pseudo_train_y, test_x, n_splits, num_class, best_params)
+    
+    n_splits = 5
+    for hidden_layer_sizes, num in zip(HIDDEN_LAYERS, range(45, 52)):
+        submission = np.zeros((len(test_x),num_class))
+        print("################################")
+        print(f"start {hidden_layer_sizes} iteration !!")
+        print("################################")
+        skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=0)
+        for i, (tr_idx, val_idx) in enumerate(skf.split(pseudo_train_x, pseudo_train_y)):
+            tr_x = pseudo_train_x.iloc[tr_idx].reset_index(drop=True)
+            tr_y = pseudo_train_y.iloc[tr_idx].reset_index(drop=True)
+            
+            model = get_NN_model(tr_x, tr_y, hidden_layer_sizes)
+            y_preda = model.predict_proba(test_x)
+            submission += y_preda
+
+        submission_df = pd.DataFrame(submission)/n_splits
+        submission_df.to_csv(f"{DATA_DIR}/my_submission{num}.csv", header=False)
+        print("#################################")
+        print(submission_df)
+        print("#################################")
+
+
+    
 
 
 if __name__ == "__main__":
-    main()
+    with ProcessPoolExecutor(max_workers=1) as executer:
+        executer.submit(main()) # CPU4つ使っている。
