@@ -113,8 +113,8 @@ def get_rf_model(tr_x, tr_y, depth):
         max_features='auto', 
         min_impurity_split=1e-07, 
         min_samples_leaf=1,
-        n_estimators=1, 
-        n_jobs=1, 
+        n_estimators=100, 
+        n_jobs=4, 
         verbose=10, 
     )
     model.fit(tr_x, tr_y)
@@ -190,7 +190,7 @@ def main():
     pseudo_train_x, pseudo_train_y = train_x, train_y
     num_class = 8
 
-    n_splits = 2
+    n_splits = 5
     for depth, num in zip(DEPTH_NUMS, range(52, 57)):
         submission = np.zeros((len(test_x),num_class))
         print("################################")
