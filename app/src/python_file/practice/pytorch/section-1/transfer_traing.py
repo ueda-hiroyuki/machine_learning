@@ -139,6 +139,7 @@ def main():
     mean = (0.485, 0.456, 0.406)
     std = (0.229, 0.224, 0.225)
     batch_size = 32  # ミニバッチサイズの設定
+    is_use_pretrained = True
 
     path_list_for_train = make_datapath_list(phase="train")
     path_list_for_valid = make_datapath_list(phase="valid")
@@ -162,6 +163,21 @@ def main():
     )  # 検証用用Dataloader
 
     data_loaders_dict = {"train": train_dataloader, "valid": valid_dataloader}
+    net = models.vgg16(
+        pretrained=is_use_pretrained
+    )  # vgg16は「特徴抽出部(features)」と「クラス分類部(classifier)」の2部に分かれている。
+
+    net.classifier[6] = nn.Linear(
+        in_features=4096, out_features=2
+    )  # vgg16の出力層を置換している(出力は「アリ」or「ハチ」の2種類)
+    net.train()  # netを学習モードに変更
+
+    criterion = nn.CrossEntropyLoss()  # 分類問題の損失関数は基本的に「クロスエントロピー誤差関数」を用いる。
+
+    # for i, (name, param) in enumerate(net.named_parameters()): # name: どこの層のパラメータなのか　param： 各層における学習済みのweightまたはbias
+    #     print(f"###################{i}##################")
+    #     print(name, param)
+    # print(net)
 
 
 if __name__ == "__main__":
