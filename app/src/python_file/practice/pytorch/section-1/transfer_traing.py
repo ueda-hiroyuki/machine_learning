@@ -16,6 +16,26 @@ from torchvision import models, transforms
 
 
 DATA_DIR = "src/sample_data/pytorch_advanced/1_image_classification/data"
+HYMENOPTERA_DATA_DIR = (
+    "src/sample_data/pytorch_advanced/1_image_classification/data/hymenoptera_data"
+)
+
+
+def make_datapath_list(phase="train"):
+    """
+    データのパスを格納したリストを作成する。
+    ・input
+        phase：'train' or 'valid'
+        ⇒ 学習用データ、または検証用データかを指定する。
+    ・output
+        path_list：list
+        ⇒ データへのパスを格納したリスト
+    """
+    target_path = f"{HYMENOPTERA_DATA_DIR}/{phase}/**/*.jpg"
+    path_list = []
+    for path in glob.glob(target_path):
+        path_list.append(path)
+    return path_list
 
 
 class ImageTransform:
@@ -60,22 +80,88 @@ class ImageTransform:
         return self.data_transforms[phase](img)
 
 
-def main():
-    img = Image.open(f"{DATA_DIR}/goldenretriever-3724972_640.jpg")
+class HymenopteraDataset(data.Dataset):
+    """
+    アリとハチの画像のDatasetクラスpytorchの「Datasetクラス」を継承している。
+    ⇒ 画像データとそれに対応するラベルを1組返すモジュール
+    ⇒ 上記画像データはtransformsにより前処理済みのものである(従って、Datasetを作成する際にはtransformsを引数として渡す必要がある)
 
+    〇Datasetクラスを自作する条件
+    ⓵pytorchのDatasetクラスを継承する
+    ⓶__len__を実装する ⇒ __len__は、len(obj)で実行されたときにコールされる関数。
+    ⓷__getitem__を実装する ⇒ __getitem__は、obj[i]のようにインデックスで指定されたときにコールされる関数。
+
+    ・input
+        path_list：画像のpathを格納したリスト
+        transform：前処理クラスのインスタンス
+        phase：'train'または'valid'
+    """
+
+    def __init__(self, file_list, transform=None, phase="train"):
+        self.file_list = file_list
+        self.transform = transform
+        self.phase = phase
+
+    def __len__(self):
+        return len(self.file_list)  # 画像の枚数を返す
+
+    def __getitem__(self, index):
+        """
+        前処理をした画像のTensor形式のデータとラベルを取得する
+        """
+
+        img_path = self.file_list[index]
+        img = Image.open(img_path)
+
+        transformed_img = self.transform(
+            img, "train"
+        )  # 画像の前処理の実施(call関数実行) ⇒ Tensor([3,224,224])
+
+        # 画像のラベル(アリorハチ)をpathから抜き出す
+        if "ants" in img_path:
+            label = "ants"
+        elif "bees" in img_path:
+            label = "bees"
+        else:
+            label = ""
+
+        # ラベルを数値に変換する
+        if label == "ants":
+            label = 0
+        elif label == "bees":
+            label = 1
+
+        return transformed_img, label
+
+
+def main():
     resize = 224
     mean = (0.485, 0.456, 0.406)
     std = (0.229, 0.224, 0.225)
+    batch_size = 32  # ミニバッチサイズの設定
 
-    transform = ImageTransform(resize, mean, std)
-    img_transformed = transform(img, "train")
-    img_transformed = img_transformed.numpy().transpose((1, 2, 0))
-    img_transformed = np.clip(img_transformed, 0, 1)
+    path_list_for_train = make_datapath_list(phase="train")
+    path_list_for_valid = make_datapath_list(phase="valid")
 
-    print(img_transformed)
+    train_dataset = HymenopteraDataset(
+        file_list=path_list_for_train,
+        transform=ImageTransform(resize, mean, std),
+        phase="train",
+    )
+    valid_dataset = HymenopteraDataset(
+        file_list=path_list_for_valid,
+        transform=ImageTransform(resize, mean, std),
+        phase="valid",
+    )
 
-    plt.imshow(img_transformed)
-    plt.savefig(f"{DATA_DIR}/Augumentations.jpg")
+    train_dataloader = data.DataLoader(
+        train_dataset, batch_size, shuffle=True
+    )  # 学習用Dataloader: データセットからデータをバッチサイズに固めて返すモジュール(Tensor型：勾配計算時必須)
+    valid_dataloader = data.DataLoader(
+        valid_dataset, batch_size, shuffle=False
+    )  # 検証用用Dataloader
+
+    data_loaders_dict = {"train": train_dataloader, "valid": valid_dataloader}
 
 
 if __name__ == "__main__":
