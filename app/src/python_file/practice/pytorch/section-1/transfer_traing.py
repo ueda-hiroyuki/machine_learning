@@ -133,54 +133,55 @@ class HymenopteraDataset(data.Dataset):
 
         return transformed_img, label
 
-    def train_model(net, data_loaders_dict, criterion, optimizer, num_epoch):
-        for epoch in range(num_epoch):
-            print(f"start {epoch}/{num_epoch} epoch !!")
 
-            # 1 epoch毎に学習と検証を繰り返す。
-            for phase in ["train", "valid"]:
-                if phase == "train":
-                    net.train()  # モデルを学習モードにする
-                else:
-                    net.eval()  # モデルを検証モードにする
-                epoch_loss = 0.0  # モデルの損失和
-                epoch_corrects = 0  # epochの正解数
+def train_model(net, data_loaders_dict, criterion, optimizer, num_epoch):
+    # epochのループ
+    for epoch in range(num_epoch):
+        print("#################################")
+        print(f"start {epoch+1}/{num_epoch} epoch !!")
+        print("#################################")
 
-                # 未学習時の検証性能を確認するため、epochが0の時の学習は省略
-                if (epoch == 0) and (phase == "train"):
-                    continue
+        # 1 epoch毎に学習と検証を繰り返す。
+        for phase in ["train", "valid"]:
 
-                for inputs, labels in tqdm(
-                    data_loaders_dict[phase]
-                ):  # phaseをキーにしてそれぞれのDataloaderを取得
-                    optimizer.zero_grad()  # optimizerを初期化
+            if phase == "train":
+                net.train()  # モデルを学習モードにする
+            else:
+                net.eval()  # モデルを検証モードにする
+            epoch_loss = 0.0  # モデルの損失和
+            epoch_corrects = 0  # epochの正解数
 
-                    # 順伝播計算
-                    with torch.set_grad_enabled(
-                        phase == "train"
-                    ):  # ()内がTrueの時、つまり学習時には順伝播計算を行う。
-                        outputs = net(inputs)
-                        loss = criterion(outputs, labels)  # 出力と正解ラベルを比較し、lossを算出する。
-                        _, preds = torch.max(
-                            outputs, 1
-                        )  # labelを出力(2次元配列の行方向の最大値indexが返る)
-                        if phase == "train":
-                            loss.backward()  # 学習時には誤差逆伝播を行う
-                            optimizer.step()  # パラメータの更新(勾配計算後に呼び出せる)
+            # 未学習時の検証性能を確認するため、epochが0の時の学習は省略
+            if (epoch == 0) and (phase == "train"):
+                continue
 
-                            # イテレーション結果の計算
-                            epoch_loss += loss.item() * inputs.size(0)  # lossの合計を更新
-                            epoch_corrects += torch.sum(
-                                preds == labels.data
-                            )  # 正解数の合計を更新
+            for inputs, labels in tqdm(
+                data_loaders_dict[phase]
+            ):  # phaseをキーにしてそれぞれのDataloaderを取得
+                optimizer.zero_grad()  # optimizerを初期化
 
-                # epoch毎の正解率とlossを表示
-                epoch_loss = epoch_loss / len(data_loaders_dict[phase].dataset)
-                epoch_acc = epoch_corrects.double() / len(
-                    data_loaders_dict[phase].dataset
-                )
+                # 順伝播計算
+                with torch.set_grad_enabled(
+                    phase == "train"
+                ):  # ()内がTrueの時、つまり学習時には順伝播計算を行う。
+                    outputs = net(inputs)
+                    loss = criterion(outputs, labels)  # 出力と正解ラベルを比較し、lossを算出する。
+                    _, preds = torch.max(outputs, 1)  # labelを出力(2次元配列の行方向の最大値indexが返る)
+                    if phase == "train":
+                        loss.backward()  # 学習時には誤差逆伝播を行う
+                        optimizer.step()  # パラメータの更新(勾配計算後に呼び出せる)
 
-                print(f"{phase} Loss:{epoch_loss}, Acc:{epoch_acc}")
+                    # イテレーション結果の計算
+                    epoch_loss += loss.item() * inputs.size(0)  # lossの合計を更新
+                    epoch_corrects += torch.sum(preds == labels.data)  # 正解数の合計を更新
+
+            # epochごとのlossと正解率を表示
+            epoch_loss = epoch_loss / len(data_loaders_dict[phase].dataset)
+            epoch_acc = epoch_corrects.double() / len(data_loaders_dict[phase].dataset)
+
+            print("#################################")
+            print(f"{phase} Loss:{epoch_loss}, Acc:{epoch_acc}")
+            print("#################################")
 
 
 def main():
