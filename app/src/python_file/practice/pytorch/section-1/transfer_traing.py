@@ -133,12 +133,62 @@ class HymenopteraDataset(data.Dataset):
 
         return transformed_img, label
 
+    def train_model(net, data_loaders_dict, criterion, optimizer, num_epoch):
+        for epoch in range(num_epoch):
+            print(f"start {epoch}/{num_epoch} epoch !!")
+
+            # 1 epoch毎に学習と検証を繰り返す。
+            for phase in ["train", "valid"]:
+                if phase == "train":
+                    net.train()  # モデルを学習モードにする
+                else:
+                    net.eval()  # モデルを検証モードにする
+                epoch_loss = 0.0  # モデルの損失和
+                epoch_corrects = 0  # epochの正解数
+
+                # 未学習時の検証性能を確認するため、epochが0の時の学習は省略
+                if (epoch == 0) and (phase == "train"):
+                    continue
+
+                for inputs, labels in tqdm(
+                    data_loaders_dict[phase]
+                ):  # phaseをキーにしてそれぞれのDataloaderを取得
+                    optimizer.zero_grad()  # optimizerを初期化
+
+                    # 順伝播計算
+                    with torch.set_grad_enabled(
+                        phase == "train"
+                    ):  # ()内がTrueの時、つまり学習時には順伝播計算を行う。
+                        outputs = net(inputs)
+                        loss = criterion(outputs, labels)  # 出力と正解ラベルを比較し、lossを算出する。
+                        _, preds = torch.max(
+                            outputs, 1
+                        )  # labelを出力(2次元配列の行方向の最大値indexが返る)
+                        if phase == "train":
+                            loss.backward()  # 学習時には誤差逆伝播を行う
+                            optimizer.step()  # パラメータの更新(勾配計算後に呼び出せる)
+
+                            # イテレーション結果の計算
+                            epoch_loss += loss.item() * inputs.size(0)  # lossの合計を更新
+                            epoch_corrects += torch.sum(
+                                preds == labels.data
+                            )  # 正解数の合計を更新
+
+                # epoch毎の正解率とlossを表示
+                epoch_loss = epoch_loss / len(data_loaders_dict[phase].dataset)
+                epoch_acc = epoch_corrects.double() / len(
+                    data_loaders_dict[phase].dataset
+                )
+
+                print(f"{phase} Loss:{epoch_loss}, Acc:{epoch_acc}")
+
 
 def main():
     resize = 224
     mean = (0.485, 0.456, 0.406)
     std = (0.229, 0.224, 0.225)
     batch_size = 32  # ミニバッチサイズの設定
+    num_epoch = 5
     is_use_pretrained = True
 
     path_list_for_train = make_datapath_list(phase="train")
@@ -160,7 +210,7 @@ def main():
     )  # 学習用Dataloader: データセットからデータをバッチサイズに固めて返すモジュール(Tensor型：勾配計算時必須)
     valid_dataloader = data.DataLoader(
         valid_dataset, batch_size, shuffle=False
-    )  # 検証用用Dataloader
+    )  # 検証用Dataloader
 
     data_loaders_dict = {"train": train_dataloader, "valid": valid_dataloader}
     net = models.vgg16(
@@ -172,12 +222,25 @@ def main():
     )  # vgg16の出力層を置換している(出力は「アリ」or「ハチ」の2種類)
     net.train()  # netを学習モードに変更
 
-    criterion = nn.CrossEntropyLoss()  # 分類問題の損失関数は基本的に「クロスエントロピー誤差関数」を用いる。
+    updated_params = []  # 学習させるパラメータを格納する
+    learning_params_name = [
+        "classifier.6.weight",
+        "classifier.6.bias",
+    ]  # 再学習させるのは最終層の重みとバイアスのみ(転移学習)
 
-    # for i, (name, param) in enumerate(net.named_parameters()): # name: どこの層のパラメータなのか　param： 各層における学習済みのweightまたはbias
-    #     print(f"###################{i}##################")
-    #     print(name, param)
-    # print(net)
+    for name, param in net.named_parameters():
+        if name in learning_params_name:
+            param.requires_grad = True  # Trueの場合は勾配が再計算される。
+            updated_params.append(param)
+        else:
+            param.requires_grad = False  # Falseの場合は勾配は固定される
+
+    criterion = nn.CrossEntropyLoss()  # 分類問題の損失関数は基本的に「クロスエントロピー誤差関数」を用いる。
+    optimizer = optim.SGD(
+        params=updated_params, lr=0.001, momentum=0.9
+    )  # 引数のparamsには再学習させる最終層のパラメータしか渡さない(全体を学習させたい場合は「params=net.parameters()」)
+
+    train_model(net, data_loaders_dict, criterion, optimizer, num_epoch)
 
 
 if __name__ == "__main__":
