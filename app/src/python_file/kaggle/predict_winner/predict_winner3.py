@@ -1,9 +1,12 @@
+import joblib
+import trueskill as ts
 import pandas as pd
 import numpy as np
 import lightgbm as lgb
 import matplotlib.pyplot as plt
 import category_encoders as ce
 import optuna  # ハイパーパラメータチューニング自動化ライブラリ
+from tqdm import tqdm
 from optuna.integration import lightgbm_tuner
 from python_file.kaggle.common import common_funcs as cf
 from sklearn.model_selection import train_test_split, StratifiedKFold
@@ -13,7 +16,7 @@ from sklearn.metrics import accuracy_score
 DATA_DIR = "src/sample_data/Kaggle/predict_winner"
 TRAIN_PATH = f"{DATA_DIR}/train_data.csv"
 TEST_PATH = f"{DATA_DIR}/test_data.csv"
-REMOVAL_COLS = ["lobby", "game-ver"]
+REMOVAL_COLS = ["lobby", "game-ver", "period"]
 
 rank_map = {
     "c-": 1,
@@ -30,6 +33,94 @@ rank_map = {
     "s+": 12,
     "x": 13,
 }
+
+weapon_cols = [
+    "A1-weapon",
+    "A2-weapon",
+    "A3-weapon",
+    "A4-weapon",
+    "B1-weapon",
+    "B2-weapon",
+    "B3-weapon",
+    "B4-weapon",
+]
+
+
+def calc_weapon_rate(df, mode):
+
+    """
+    各modeにおける武器レーティングの算出
+    """
+    env = ts.TrueSkill()
+    weapon_dict = {}
+
+    if mode != "all":
+        _df = df[df["mode"] == mode]
+    else:
+        _df = df.copy()
+
+    # 両チーム4人そろっているものを対象
+    _df = _df[
+        ~(
+            _df[
+                [
+                    "A1-weapon",
+                    "A2-weapon",
+                    "A3-weapon",
+                    "A4-weapon",
+                    "B1-weapon",
+                    "B2-weapon",
+                    "B3-weapon",
+                    "B4-weapon",
+                ]
+            ]
+            .isnull()
+            .sum(axis=1)
+            > 0
+        )
+    ]
+
+    # 全員のランクが同一のバトルを対象
+    if mode not in ["nawabari", "all"]:
+        _df = _df[
+            (_df["A1-rank"] == _df["A2-rank"])
+            & (_df["A1-rank"] == _df["A3-rank"])
+            & (_df["A1-rank"] == _df["A4-rank"])
+            & (_df["A1-rank"] == _df["B1-rank"])
+            & (_df["A1-rank"] == _df["B2-rank"])
+            & (_df["A1-rank"] == _df["B3-rank"])
+            & (_df["A1-rank"] == _df["B4-rank"])
+        ]
+
+    for idx, row in tqdm(_df.sort_values("period").iterrows(), total=len(_df)):
+        team_a = {}
+        team_b = {}
+
+        for weapon_column in ["A1-weapon", "A2-weapon", "A3-weapon", "A4-weapon"]:
+            weapon = row[weapon_column]
+            team_a[weapon] = weapon_dict.get(weapon, env.create_rating())
+
+        for weapon_column in ["B1-weapon", "B2-weapon", "B3-weapon", "B4-weapon"]:
+            weapon = row[weapon_column]
+            team_b[weapon] = weapon_dict.get(weapon, env.create_rating())
+
+        team_a, team_b, = env.rate(
+            (
+                team_a,
+                team_b,
+            ),
+            ranks=(
+                abs(row["y"] - 1),
+                row["y"],
+            ),
+        )
+
+        weapon_dict.update(team_a)
+        weapon_dict.update(team_b)
+
+    rate_dict = {k: float(v) for k, v in weapon_dict.items()}
+
+    return rate_dict
 
 
 def preprocess(train_path, test_path):
@@ -50,17 +141,29 @@ def preprocess(train_path, test_path):
     filterd_raw_data = filterd_raw_data.fillna(filterd_raw_data.mode().iloc[0]).drop(
         REMOVAL_COLS, axis=1
     )
+    dfs = []
+    for mode in ["nawabari", "area", "asari", "hoko", "yagura"]:
+        weapons_rating = joblib.load(f"{DATA_DIR}/weapons_rating_{mode}.pkl")
+        extracted = filterd_raw_data[filterd_raw_data["mode"] == mode]
+        rate_map = {}
+        for _, row in weapons_rating.iterrows():
+            rate_map[row.weapon] = row.rating
+        for col in weapon_cols:
+            extracted[col] = extracted[col].map(rate_map)
+        dfs.append(extracted)
 
-    for name in filterd_raw_data.columns:
+    mapped_data = pd.concat(dfs, axis=0).reset_index(drop=True)
+
+    for name in mapped_data.columns:
         if "rank" in name:
-            filterd_raw_data[name] = filterd_raw_data[name].map(rank_map)
+            mapped_data[name] = mapped_data[name].map(rank_map)
 
     categorical_columns = [
-        x for x in filterd_raw_data.columns if filterd_raw_data[x].dtype == "object"
+        x for x in mapped_data.columns if mapped_data[x].dtype == "object"
     ]
 
     ce_oe = ce.OrdinalEncoder(cols=categorical_columns, handle_unknown="impute")
-    encorded_data = ce_oe.fit_transform(filterd_raw_data)
+    encorded_data = ce_oe.fit_transform(mapped_data)
 
     train = (
         encorded_data[encorded_data["usage"] == 0]
@@ -75,9 +178,9 @@ def preprocess(train_path, test_path):
 
     # cf.check_corr(train, "predict_winner")
 
-    train_y = train.loc[:, "y"]
-    train_x = train.drop(["y"], axis=1)
-    test_x = test.drop(["y"], axis=1)
+    train_y = train.loc[:, "y"].reset_index(drop=True)
+    train_x = train.drop(["y"], axis=1).reset_index(drop=True)
+    test_x = test.drop(["y"], axis=1).sort_values("id").reset_index(drop=True)
 
     return train_x, train_y, test_x
 
@@ -168,13 +271,13 @@ def accuracy(preds, data, threshold=0.5):
 
 def predict(model, test_x, threshold):
     y_pred = model.predict(test_x, num_iteration=model.best_iteration)
-    pred = [0 if i < threshold else 1 for i in y_pred]
-    return pd.Series(pred)
+    return pd.Series(y_pred)
 
 
 def run_all():
     # train用とtest用のデータの前処理
     train_x, train_y, test_x = preprocess(TRAIN_PATH, TEST_PATH)
+
     ids = test_x.loc[:, "id"]
 
     # # 学習用のハイパラをチューニング
@@ -188,17 +291,17 @@ def run_all():
 
     # 評価
     threshold = 0.5
-    y_preds = []
+    y_preds = pd.Series(np.zeros(len(test_x)), name="y")
     for i, model in enumerate(models):
         y_pred = predict(model, test_x, threshold)
-        y_preds.append(y_pred)
+        y_preds += y_pred
 
     # 提出用ファイル成型
-    winner_pred = pd.concat(y_preds, axis=1).mode(axis=1).rename(columns={0: "y"})
-    submission = pd.concat([ids, winner_pred], axis=1)
-
+    winner_pred = np.where(y_preds / n_splits > threshold, 1, 0)
+    submission = pd.concat([ids, pd.Series(winner_pred, name="y")], axis=1)
     print(submission)
-    submission.to_csv(f"{DATA_DIR}/submission9.csv", index=False)
+
+    submission.to_csv(f"{DATA_DIR}/submission8.csv", index=False)
 
 
 if __name__ == "__main__":
