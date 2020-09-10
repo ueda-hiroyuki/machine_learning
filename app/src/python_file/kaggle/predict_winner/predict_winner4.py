@@ -83,9 +83,9 @@ def train(train_x, train_y, kfold, best_params=None):
         "boosting_type": "gbdt",
         "metric": {"binary_logloss"},
         "num_leaves": 50,
-        "min_data_in_leaf": 100,
-        "learning_rate": 0.1,
-        "feature_fraction": 0.5,
+        "min_data_in_leaf": 1000,
+        "learning_rate": 0.01,
+        "feature_fraction": 0.7,
     }
     models = []
     for i, (tr_idx, val_idx) in enumerate(kfold.split(train_x, train_y)):
@@ -102,7 +102,7 @@ def train(train_x, train_y, kfold, best_params=None):
             params=params,
             train_set=tr_set,
             valid_sets=[val_set, tr_set],
-            num_boost_round=1000,
+            num_boost_round=10000,
             early_stopping_rounds=100,
             verbose_eval=1,
             evals_result=evals_result,
@@ -153,14 +153,58 @@ def run_all():
     train_raw_data["usage"] = 0  # for train
     test_raw_data["usage"] = 1  # for test
 
-    train_data, test_data = cm.make_feature(train_raw_data, test_raw_data)
+    X = cm.make_input_output(train_raw_data, with_y=False)
+    train_data = pd.concat([train_raw_data, X], axis=1)
 
+    # 武器ごとの勝率健計算
+    win_rate_df = []
+    for buki in buki_raw_data.key.unique():
+        # print(buki, win_rate(buki))
+        rate, count = cm.win_rate(buki, train_data)
+        win_rate_df.append([buki, rate, count])
+    win_rate_df = pd.DataFrame(win_rate_df, columns=["buki", "win_rate", "count"])
+    win_rate_df = win_rate_df.sort_values(by="win_rate", ascending=False)
+    buki_ja_dict = buki_raw_data[["key", "reskin"]].set_index("key").to_dict()["reskin"]
+    win_rate_df.buki = win_rate_df.buki.map(buki_ja_dict)
+    win_rate_dict = (
+        win_rate_df.reset_index(drop=True)
+        .loc[:, ["buki", "win_rate"]]
+        .set_index("buki")
+        .to_dict()
+    )[
+        "win_rate"
+    ]  # 全体の勝率dict(武器名: 勝率)
+
+    # モード毎の武器勝率計算
+    win_rate_mode_df = pd.DataFrame()
+    for mode in train_data["mode"].unique():
+        win_rate_df = []
+        train_mode = train_data[train_data["mode"] == mode]
+        for buki in buki_raw_data.key.unique():
+            # print(buki, win_rate(buki))
+            rate, count = cm.win_rate(buki, train_mode)
+            win_rate_df.append([buki, rate, count])
+        win_rate_df = pd.DataFrame(
+            win_rate_df, columns=[mode + "_buki", mode + "_win_rate", mode + "_count"]
+        )
+        win_rate_df = win_rate_df.sort_values(by=mode + "_win_rate", ascending=False)
+        buki_ja_dict = (
+            buki_raw_data[["key", "reskin"]].set_index("key").to_dict()["reskin"]
+        )
+        win_rate_df[mode + "_buki"] = win_rate_df[mode + "_buki"].map(buki_ja_dict)
+        win_rate_df = win_rate_df.reset_index(drop=True)
+        win_rate_mode_df = pd.concat([win_rate_mode_df, win_rate_df], axis=1)
+
+    train_data, test_data = cm.make_feature(train_raw_data, test_raw_data)
     raw_data = pd.concat([train_data, test_data], axis=0).reset_index(drop=True)
 
-    categorical_columns = [x for x in raw_data.columns if raw_data[x].dtype == "object"]
+    data = cm.calc_weapons_win_rate_avg(raw_data, win_rate_dict)
+    data = cm.calc_weapons_win_rate_avg_per_mode(data, win_rate_mode_df)
+
+    categorical_columns = [x for x in data.columns if data[x].dtype == "object"]
 
     ce_oe = ce.OrdinalEncoder(cols=categorical_columns, handle_unknown="impute")
-    encorded_data = ce_oe.fit_transform(raw_data)
+    encorded_data = ce_oe.fit_transform(data)
 
     train_data = (
         encorded_data[encorded_data["usage"] == 0]
@@ -177,6 +221,8 @@ def run_all():
     train_x = train_data.drop(["y"], axis=1)
     test_x = test_data.drop(["y"], axis=1)
 
+    print(train_x, test_x)
+
     ids = test_x.loc[:, "id"]
 
     # # 学習用のハイパラをチューニング
@@ -185,7 +231,7 @@ def run_all():
     # 学習
     n_splits = 5
     kfold = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=0)
-    models = train(train_x, train_y, kfold, best_params)
+    models = train(train_x, train_y, kfold)
 
     # 評価
     threshold = 0.5
@@ -199,8 +245,7 @@ def run_all():
     submission = pd.concat([ids, winner_pred], axis=1)
 
     print(submission)
-    print(best_params)
-    submission.to_csv(f"{DATA_DIR}/submission14.csv", index=False)
+    submission.to_csv(f"{DATA_DIR}/submission16.csv", index=False)
 
 
 if __name__ == "__main__":
