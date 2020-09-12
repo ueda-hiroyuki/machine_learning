@@ -156,7 +156,7 @@ def run_all():
     X = cm.make_input_output(train_raw_data, with_y=False)
     train_data = pd.concat([train_raw_data, X], axis=1)
 
-    # 武器ごとの勝率健計算
+    # 武器ごとの勝率計算
     win_rate_df = []
     for buki in buki_raw_data.key.unique():
         # print(buki, win_rate(buki))
@@ -195,57 +195,66 @@ def run_all():
         win_rate_df = win_rate_df.reset_index(drop=True)
         win_rate_mode_df = pd.concat([win_rate_mode_df, win_rate_df], axis=1)
 
+    # 武器と射程距離の関係分類計算
+    buki_range_distance_dict = (
+        buki_raw_data.loc[:, ["category2", "key"]]
+        .set_index("key")
+        .to_dict()["category2"]
+    )
+
     train_data, test_data = cm.make_feature(train_raw_data, test_raw_data)
     raw_data = pd.concat([train_data, test_data], axis=0).reset_index(drop=True)
+    raw_data = raw_data.fillna(raw_data.mode().iloc[0])
 
-    data = cm.calc_weapons_win_rate_avg(raw_data, win_rate_dict)
-    data = cm.calc_weapons_win_rate_avg_per_mode(data, win_rate_mode_df)
+    data = cm.add_count_range_distance(raw_data, buki_range_distance_dict)
+    # data = cm.calc_weapons_win_rate_avg(data, win_rate_dict)
+    # data = cm.calc_weapons_win_rate_avg_per_mode(data, win_rate_mode_df)
 
-    categorical_columns = [x for x in data.columns if data[x].dtype == "object"]
+    # categorical_columns = [x for x in data.columns if data[x].dtype == "object"]
 
-    ce_oe = ce.OrdinalEncoder(cols=categorical_columns, handle_unknown="impute")
-    encorded_data = ce_oe.fit_transform(data)
+    # ce_oe = ce.OrdinalEncoder(cols=categorical_columns, handle_unknown="impute")
+    # encorded_data = ce_oe.fit_transform(data)
 
-    train_data = (
-        encorded_data[encorded_data["usage"] == 0]
-        .drop(["usage"], axis=1)
-        .reset_index(drop=True)
-    )
-    test_data = (
-        encorded_data[encorded_data["usage"] == 1]
-        .drop(["usage"], axis=1)
-        .reset_index(drop=True)
-    )
+    # train_data = (
+    #     encorded_data[encorded_data["usage"] == 0]
+    #     .drop(["usage"], axis=1)
+    #     .reset_index(drop=True)
+    # )
+    # test_data = (
+    #     encorded_data[encorded_data["usage"] == 1]
+    #     .drop(["usage"], axis=1)
+    #     .reset_index(drop=True)
+    # )
 
-    train_y = train_data.loc[:, "y"]
-    train_x = train_data.drop(["y"], axis=1)
-    test_x = test_data.drop(["y"], axis=1)
+    # train_y = train_data.loc[:, "y"]
+    # train_x = train_data.drop(["y"], axis=1)
+    # test_x = test_data.drop(["y"], axis=1)
 
-    print(train_x, test_x)
+    # print(train_x, test_x)
 
-    ids = test_x.loc[:, "id"]
+    # ids = test_x.loc[:, "id"]
 
-    # # 学習用のハイパラをチューニング
-    # best_params = get_best_params(train_x, train_y)
+    # # # 学習用のハイパラをチューニング
+    # # best_params = get_best_params(train_x, train_y)
 
-    # 学習
-    n_splits = 5
-    kfold = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=0)
-    models = train(train_x, train_y, kfold)
+    # # 学習
+    # n_splits = 5
+    # kfold = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=0)
+    # models = train(train_x, train_y, kfold)
 
-    # 評価
-    threshold = 0.5
-    y_preds = []
-    for i, model in enumerate(models):
-        y_pred = predict(model, test_x, threshold)
-        y_preds.append(y_pred)
+    # # 評価
+    # threshold = 0.5
+    # y_preds = []
+    # for i, model in enumerate(models):
+    #     y_pred = predict(model, test_x, threshold)
+    #     y_preds.append(y_pred)
 
-    # 提出用ファイル成型
-    winner_pred = pd.concat(y_preds, axis=1).mode(axis=1).rename(columns={0: "y"})
-    submission = pd.concat([ids, winner_pred], axis=1)
+    # # 提出用ファイル成型
+    # winner_pred = pd.concat(y_preds, axis=1).mode(axis=1).rename(columns={0: "y"})
+    # submission = pd.concat([ids, winner_pred], axis=1)
 
-    print(submission)
-    submission.to_csv(f"{DATA_DIR}/submission16.csv", index=False)
+    # print(submission)
+    # submission.to_csv(f"{DATA_DIR}/submission17.csv", index=False)
 
 
 if __name__ == "__main__":

@@ -16,6 +16,33 @@ WEAPONS = [
     "B4-weapon",
 ]
 
+WEAPONS_A = [
+    "A1-weapon",
+    "A2-weapon",
+    "A3-weapon",
+    "A4-weapon",
+]
+
+WEAPONS_B = [
+    "B1-weapon",
+    "B2-weapon",
+    "B3-weapon",
+    "B4-weapon",
+]
+
+BUKI_RANGE_CATEGORY = {
+    "charger": 1,
+    "splatling": 1,
+    "brush": 0,
+    "slosher": 0,
+    "maneuver": 0,
+    "reelgun": 0,
+    "brella": 0,
+    "roller": 0,
+    "blaster": 0,
+    "shooter": 0,
+}
+
 
 class Common:
     def __init__(self):
@@ -119,3 +146,27 @@ class Common:
                         mode_rate_dict
                     )  # 各modeにおける武器の勝率を新特徴量として追加
         return df
+
+    # 各チームにおける遠距離武器人数と近接武器人数の特徴量を追加する。
+    def add_count_range_distance(self, df, buki_range_distance_dict):
+        buki_category_list = list(set(buki_range_distance_dict.values()))
+        count_buki_rangeA = pd.DataFrame()
+        count_buki_rangeB = pd.DataFrame()
+
+        weapons_of_teamA = (
+            df.loc[:, WEAPONS_A]
+            .replace(buki_range_distance_dict)
+            .replace(BUKI_RANGE_CATEGORY)
+        ).sum(axis=1)
+        count_buki_rangeA["count_long_distance_A"] = weapons_of_teamA
+        count_buki_rangeA["count_short_distance_A"] = 4 - weapons_of_teamA
+
+        weapons_of_teamB = (
+            df.loc[:, WEAPONS_B]
+            .replace(buki_range_distance_dict)
+            .replace(BUKI_RANGE_CATEGORY)
+        ).sum(axis=1)
+        count_buki_rangeB["count_long_distance_B"] = weapons_of_teamB
+        count_buki_rangeB["count_short_distance_B"] = 4 - weapons_of_teamB
+
+        print(count_buki_rangeA.head(50), count_buki_rangeB.head(50))
