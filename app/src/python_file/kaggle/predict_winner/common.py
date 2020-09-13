@@ -103,6 +103,7 @@ class Common:
             return X, y
         return X
 
+    # 武器の勝率を計算する。
     def win_rate(self, buki_name, df):
         count = len(df[df[buki_name + "_A"] == 1]) + len(
             df[df[buki_name + "_B"] == 1]
@@ -113,6 +114,7 @@ class Common:
         rate = win / count
         return rate, count
 
+    # 各チームで使用している武器の勝率の平均値を算出する
     def calc_weapons_win_rate_avg(self, df, win_rate_dict):
         weapons_rate_A = [
             "A1-weapon_win_rate",
@@ -131,7 +133,8 @@ class Common:
                 df[f"{col}_win_rate"] = df[col].map(win_rate_dict)  # 各武器の勝率を新特徴量として追加
         df["team_A_win_rate_avg"] = df.loc[:, weapons_rate_A].mean(axis="columns")
         df["team_B_win_rate_avg"] = df.loc[:, weapons_rate_B].mean(axis="columns")
-        return df
+        # return df
+        return df.drop([*weapons_rate_A, *weapons_rate_B], axis=1)  # 平均値のみ特徴量として加える。
 
     def calc_weapons_win_rate_avg_per_mode(self, df, win_rate_mode_df):
         for mode in df["mode"].unique():
@@ -153,13 +156,17 @@ class Common:
         count_buki_rangeA = pd.DataFrame()
         count_buki_rangeB = pd.DataFrame()
 
+        teamA_counts = 4 - df.loc[:, WEAPONS_A].isnull().sum(axis=1)
+        teamB_counts = 4 - df.loc[:, WEAPONS_B].isnull().sum(axis=1)
+
         weapons_of_teamA = (
             df.loc[:, WEAPONS_A]
             .replace(buki_range_distance_dict)
             .replace(BUKI_RANGE_CATEGORY)
         ).sum(axis=1)
+
         count_buki_rangeA["count_long_distance_A"] = weapons_of_teamA
-        count_buki_rangeA["count_short_distance_A"] = 4 - weapons_of_teamA
+        count_buki_rangeA["count_short_distance_A"] = teamA_counts - weapons_of_teamA
 
         weapons_of_teamB = (
             df.loc[:, WEAPONS_B]
@@ -167,5 +174,13 @@ class Common:
             .replace(BUKI_RANGE_CATEGORY)
         ).sum(axis=1)
         count_buki_rangeB["count_long_distance_B"] = weapons_of_teamB
-        count_buki_rangeB["count_short_distance_B"] = 4 - weapons_of_teamB
+        count_buki_rangeB["count_short_distance_B"] = teamB_counts - weapons_of_teamB
         return pd.concat([df, count_buki_rangeA, count_buki_rangeB], axis=1)
+
+    # 各チームのレベル平均を算出する。
+    def calc_team_level_avg(self, df):
+        A_level_list = ["A1-level", "A2-level", "A3-level", "A4-level"]
+        B_level_list = ["B1-level", "B2-level", "B3-level", "B4-level"]
+        df["teamA_level_avg"] = df.loc[:, A_level_list].mean(axis=1)
+        df["teamB_level_avg"] = df.loc[:, B_level_list].mean(axis=1)
+        return df
