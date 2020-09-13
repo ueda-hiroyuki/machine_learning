@@ -9,8 +9,8 @@ from optuna.integration import lightgbm_tuner
 from python_file.kaggle.common import common_funcs as cf
 from sklearn.model_selection import train_test_split, StratifiedKFold
 from sklearn.metrics import accuracy_score
+from sklearn.feature_selection import RFECV, RFE
 from python_file.kaggle.predict_winner.common import Common
-
 
 DATA_DIR = "src/sample_data/Kaggle/predict_winner"
 TRAIN_PATH = f"{DATA_DIR}/train_data.csv"
@@ -77,14 +77,46 @@ def get_best_params(train_x, train_y):
     return best_params
 
 
+def objective(X, y, trial):
+    """最適化する目的関数"""
+    tr_x, val_x, tr_y, val_y = train_test_split(X, y, test_size=0.2, random_state=1)
+    gbm = lgb.LGBMClassifier(
+        objective="binary",
+        boosting_type="gbdt",
+        n_jobs=4,
+        n_estimators=1000,
+        early_stopping_rounds=100,
+        learning_rate=0.01,
+    )
+    # RFE で取り出す特徴量の数を最適化する
+    n_features_to_select = (
+        trial.suggest_int("n_features_to_select", 100, len(list(tr_x.columns))),
+    )
+    rfe = RFE(estimator=gbm, n_features_to_select=n_features_to_select)
+    rfe.fit(tr_x, tr_y)
+    selected_cols = list(tr_x.columns[rfe.support_])
+
+    tr_x_selected = tr_x.loc[:, selected_cols]
+    val_x_selected = val_x.loc[:, selected_cols]
+    gbm.fit(
+        tr_x_selected,
+        tr_y,
+        eval_set=[(val_x_selected, val_y)],
+        early_stopping_rounds=20,
+    )
+    y_pred = gbm.predict(val_x_selected)
+    accuracy = accuracy_score(val_y, y_pred)
+    return accuracy
+
+
 def train(train_x, train_y, kfold, best_params=None):
     params = {
         "objective": "binary",
         "boosting_type": "gbdt",
         "metric": {"binary_logloss"},
         "num_leaves": 50,
-        "min_data_in_leaf": 1000,
-        "learning_rate": 0.01,
+        "min_data_in_leaf": 100,
+        "learning_rate": 0.1,
         "feature_fraction": 0.7,
     }
     models = []
@@ -210,51 +242,49 @@ def run_all():
     # data = cm.calc_weapons_win_rate_avg(data, win_rate_dict)
     # data = cm.calc_weapons_win_rate_avg_per_mode(data, win_rate_mode_df)
 
-    # categorical_columns = [x for x in data.columns if data[x].dtype == "object"]
+    categorical_columns = [x for x in data.columns if data[x].dtype == "object"]
 
-    # ce_oe = ce.OrdinalEncoder(cols=categorical_columns, handle_unknown="impute")
-    # encorded_data = ce_oe.fit_transform(data)
+    ce_oe = ce.OrdinalEncoder(cols=categorical_columns, handle_unknown="impute")
+    encorded_data = ce_oe.fit_transform(data)
 
-    # train_data = (
-    #     encorded_data[encorded_data["usage"] == 0]
-    #     .drop(["usage"], axis=1)
-    #     .reset_index(drop=True)
-    # )
-    # test_data = (
-    #     encorded_data[encorded_data["usage"] == 1]
-    #     .drop(["usage"], axis=1)
-    #     .reset_index(drop=True)
-    # )
+    train_data = (
+        encorded_data[encorded_data["usage"] == 0]
+        .drop(["usage"], axis=1)
+        .reset_index(drop=True)
+    )
+    test_data = (
+        encorded_data[encorded_data["usage"] == 1]
+        .drop(["usage"], axis=1)
+        .reset_index(drop=True)
+    )
 
-    # train_y = train_data.loc[:, "y"]
-    # train_x = train_data.drop(["y"], axis=1)
-    # test_x = test_data.drop(["y"], axis=1)
+    train_y = train_data.loc[:, "y"]
+    train_x = train_data.drop(["y"], axis=1)
+    test_x = test_data.drop(["y"], axis=1)
 
-    # print(train_x, test_x)
+    ids = test_x.loc[:, "id"]
 
-    # ids = test_x.loc[:, "id"]
+    # # 学習用のハイパラをチューニング
+    # best_params = get_best_params(train_x, train_y)
 
-    # # # 学習用のハイパラをチューニング
-    # # best_params = get_best_params(train_x, train_y)
+    # 学習
+    n_splits = 5
+    kfold = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=0)
+    models = train(train_x, train_y, kfold)
 
-    # # 学習
-    # n_splits = 5
-    # kfold = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=0)
-    # models = train(train_x, train_y, kfold)
+    # 評価
+    threshold = 0.5
+    y_preds = []
+    for i, model in enumerate(models):
+        y_pred = predict(model, test_x, threshold)
+        y_preds.append(y_pred)
 
-    # # 評価
-    # threshold = 0.5
-    # y_preds = []
-    # for i, model in enumerate(models):
-    #     y_pred = predict(model, test_x, threshold)
-    #     y_preds.append(y_pred)
+    # 提出用ファイル成型
+    winner_pred = pd.concat(y_preds, axis=1).mode(axis=1).rename(columns={0: "y"})
+    submission = pd.concat([ids, winner_pred], axis=1)
 
-    # # 提出用ファイル成型
-    # winner_pred = pd.concat(y_preds, axis=1).mode(axis=1).rename(columns={0: "y"})
-    # submission = pd.concat([ids, winner_pred], axis=1)
-
-    # print(submission)
-    # submission.to_csv(f"{DATA_DIR}/submission17.csv", index=False)
+    print(submission)
+    submission.to_csv(f"{DATA_DIR}/submission18.csv", index=False)
 
 
 if __name__ == "__main__":

@@ -168,5 +168,4 @@ class Common:
         ).sum(axis=1)
         count_buki_rangeB["count_long_distance_B"] = weapons_of_teamB
         count_buki_rangeB["count_short_distance_B"] = 4 - weapons_of_teamB
-
-        print(count_buki_rangeA.head(50), count_buki_rangeB.head(50))
+        return pd.concat([df, count_buki_rangeA, count_buki_rangeB], axis=1)
