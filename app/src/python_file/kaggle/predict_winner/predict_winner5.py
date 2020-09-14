@@ -310,7 +310,9 @@ def run_all():
     submission = pd.concat([ids, winner_pred], axis=1)
 
     print(submission)
+    print("######################################")
     print(f"accuracy avg = {sum(acc_results) / len(acc_results)}")
+    print("######################################")
     submission.to_csv(f"{DATA_DIR}/submission21.csv", index=False)
 
 
