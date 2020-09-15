@@ -17,7 +17,7 @@ DATA_DIR = "src/sample_data/Kaggle/predict_winner"
 TRAIN_PATH = f"{DATA_DIR}/train_data.csv"
 TEST_PATH = f"{DATA_DIR}/test_data.csv"
 BUKI_PATH = f"{DATA_DIR}/weapon.csv"
-REMOVAL_COLS = ["lobby", "game-ver", "period", "id"]
+REMOVAL_COLS = ["lobby", "game-ver", "period"]
 
 WEAPON_MAP = {
     "heroblaster_replica": "hotblaster",
@@ -132,6 +132,7 @@ def train(train_x, train_y, kfold, best_params=None):
         "min_data_in_leaf": 100,
         "learning_rate": 0.1,
         "feature_fraction": 0.7,
+        "is_unbalance": True,
     }
     models = []
     acc_results = []
@@ -253,17 +254,20 @@ def run_all():
 
     train_data, test_data = cm.make_feature(train_raw_data, test_raw_data)
     raw_data = pd.concat([train_data, test_data], axis=0).reset_index(drop=True)
-    raw_data = raw_data.fillna(raw_data.mode().iloc[0])
+    raw_data = raw_data.fillna(raw_data.mode().iloc[0]).drop(REMOVAL_COLS, axis=1)
+    for name in raw_data.columns:
+        if "rank" in name:
+            raw_data[name] = raw_data[name].map(RANK_MAP)
 
-    data = raw_data
-    # data = cm.calc_team_level_avg(raw_data)
-    # data = cm.add_count_range_distance(data, buki_range_distance_dict)
+    data = cm.calc_team_level_avg(raw_data)
+    data = cm.calc_team_rank_avg(data)
+    data = cm.add_count_range_distance(data, buki_range_distance_dict)
     # data = cm.calc_weapons_win_rate_avg(data, win_rate_dict)
     # data = cm.calc_weapons_win_rate_avg_per_mode(data, win_rate_mode_df)
 
     categorical_columns = [x for x in data.columns if data[x].dtype == "object"]
 
-    ce_oe = ce.OrdinalEncoder(cols=categorical_columns, handle_unknown="impute")
+    ce_oe = ce.OneHotEncoder(cols=categorical_columns, handle_unknown="impute")
     encorded_data = ce_oe.fit_transform(data)
 
     train_data = (
@@ -277,18 +281,19 @@ def run_all():
         .reset_index(drop=True)
     )
 
+    print(train_data, test_data)
+
     ids = test_data.loc[:, "id"]
 
     train_y = train_data.loc[:, "y"]
-    train_x = train_data.drop(["y"], axis=1).drop(REMOVAL_COLS, axis=1)
-    test_x = test_data.drop(["y"], axis=1).drop(REMOVAL_COLS, axis=1)
+    train_x = train_data.drop(["y"], axis=1)
+    test_x = test_data.drop(["y"], axis=1)
 
-    # importance結果を算出
-    importance = get_important_features(train_x, train_y)
-    selected_feature = list(importance.head(round(len(importance) * 0.1)).index)
-
-    selected_train_x = train_x.loc[:, selected_feature]
-    selected_test_x = test_x.loc[:, selected_feature]
+    # # importance結果を算出
+    # importance = get_important_features(train_x, train_y)
+    # selected_feature = list(importance.head(round(len(importance) * 0.1)).index)
+    # selected_train_x = train_x.loc[:, selected_feature]
+    # selected_test_x = test_x.loc[:, selected_feature]
 
     # # 学習用のハイパラをチューニング
     # best_params = get_best_params(train_x, train_y)
@@ -296,13 +301,13 @@ def run_all():
     # 学習
     n_splits = 5
     kfold = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=0)
-    models, acc_results = train(selected_train_x, train_y, kfold)
+    models, acc_results = train(train_x, train_y, kfold)
 
     # 評価
     threshold = 0.5
     y_preds = []
     for i, model in enumerate(models):
-        y_pred = predict(model, selected_test_x, threshold)
+        y_pred = predict(model, test_x, threshold)
         y_preds.append(y_pred)
 
     # 提出用ファイル成型
@@ -313,7 +318,7 @@ def run_all():
     print("######################################")
     print(f"accuracy avg = {sum(acc_results) / len(acc_results)}")
     print("######################################")
-    submission.to_csv(f"{DATA_DIR}/submission21.csv", index=False)
+    submission.to_csv(f"{DATA_DIR}/submission24.csv", index=False)
 
 
 if __name__ == "__main__":
