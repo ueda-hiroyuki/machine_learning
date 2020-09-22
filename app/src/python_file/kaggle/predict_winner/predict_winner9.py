@@ -134,7 +134,6 @@ def run_all():
     # 武器ごとの勝率計算
     win_rate_df = []
     for buki in buki_raw_data.key.unique():
-        # print(buki, win_rate(buki))
         rate, count = cm.win_rate(buki, train_data)
         win_rate_df.append([buki, rate, count])
     win_rate_df = pd.DataFrame(win_rate_df, columns=["buki", "win_rate", "count"])
@@ -231,7 +230,7 @@ def run_all():
         y_pred = model.predict_proba(test_x)
         add_data += y_pred
     add_data = pd.DataFrame(add_data / len(models))
-    pseudo_label = add_data[(add_data[0] > 0.7) | (add_data[1] > 0.7)].idxmax(
+    pseudo_label = add_data[(add_data[0] > 0.9) | (add_data[1] > 0.9)].idxmax(
         axis=1
     )  # 予測確率の高い行の疑似正解ラベルを取得する
 
@@ -239,32 +238,30 @@ def run_all():
         [test_x.iloc[pseudo_label.index], pseudo_label], axis=1
     ).rename(columns={0: "y"})
 
-    print(pseudo_data)
+    new_train_x = pd.concat(
+        [train_x, pseudo_data.drop("y", axis=1)], axis=0
+    ).reset_index(drop=True)
+    new_train_y = pd.concat([train_y, pseudo_label], axis=0).reset_index(drop=True)
 
-    # new_train_x = pd.concat(
-    #     [train_x, pseudo_data.drop("y", axis=1)], axis=0
-    # ).reset_index(drop=True)
-    # new_train_y = pd.concat([train_y, pseudo_label], axis=0).reset_index(drop=True)
+    # pseudo_labeling後の再学習
+    models, acc_results = train(new_train_x, new_train_y, kfold)
 
-    # # pseudo_labeling後の再学習
-    # models, acc_results = train(new_train_x, new_train_y, kfold)
+    # 評価
+    threshold = 0.5
+    y_preds = []
+    for i, model in enumerate(models):
+        y_pred = predict(model, test_x, threshold)
+        y_preds.append(y_pred)
 
-    # # 評価
-    # threshold = 0.5
-    # y_preds = []
-    # for i, model in enumerate(models):
-    #     y_pred = predict(model, test_x, threshold)
-    #     y_preds.append(y_pred)
+    # 提出用ファイル成型
+    winner_pred = pd.concat(y_preds, axis=1).mode(axis=1).rename(columns={0: "y"})
+    submission = pd.concat([ids, winner_pred], axis=1)
 
-    # # 提出用ファイル成型
-    # winner_pred = pd.concat(y_preds, axis=1).mode(axis=1).rename(columns={0: "y"})
-    # submission = pd.concat([ids, winner_pred], axis=1)
-
-    # print(submission)
-    # print("######################################")
-    # print(f"accuracy avg = {sum(acc_results) / len(acc_results)}")
-    # print("######################################")
-    # submission.to_csv(f"{DATA_DIR}/submission32.csv", index=False)
+    print(submission)
+    print("######################################")
+    print(f"accuracy avg = {sum(acc_results) / len(acc_results)}")
+    print("######################################")
+    submission.to_csv(f"{DATA_DIR}/submission36.csv", index=False)
 
 
 if __name__ == "__main__":

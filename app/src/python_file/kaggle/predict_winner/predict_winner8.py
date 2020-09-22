@@ -209,8 +209,8 @@ def run_all():
     ids = test_data.loc[:, "id"]
 
     train_y = train_data.loc[:, "y"]
-    train_x = train_data.drop(["y"], axis=1)
-    test_x = test_data.drop(["y"], axis=1)
+    train_x = train_data.drop(["y", "id"], axis=1)
+    test_x = test_data.drop(["y", "id"], axis=1)
 
     # # importance結果を算出
     # importance = get_important_features(train_x, train_y)
@@ -241,7 +241,7 @@ def run_all():
     print("######################################")
     print(f"accuracy avg = {sum(acc_results) / len(acc_results)}")
     print("######################################")
-    submission.to_csv(f"{DATA_DIR}/submission31.csv", index=False)
+    submission.to_csv(f"{DATA_DIR}/submission33.csv", index=False)
 
 
 if __name__ == "__main__":
