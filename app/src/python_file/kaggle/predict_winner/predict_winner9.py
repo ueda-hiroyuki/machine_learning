@@ -53,7 +53,6 @@ cm = Common()
 
 
 def train(train_x, train_y, kfold, best_params=None):
-    print(train_x.dtypes)
     categorical_columns = [x for x in train_x.columns if train_x[x].dtype == "object"]
     params = {
         "objective": "binary",
@@ -98,6 +97,27 @@ def train(train_x, train_y, kfold, best_params=None):
         acc_results.append(accuracy)
 
     return models, acc_results
+
+
+def get_important_features(train_x, train_y):
+    tr_x, val_x, tr_y, val_y = train_test_split(train_x, train_y, random_state=1)
+    model = CatBoostClassifier(
+        iterations=1000,
+        learning_rate=0.1,
+        use_best_model=True,
+        eval_metric="Accuracy",
+    )
+    model.fit(
+        tr_x,
+        tr_y,
+        eval_set=(val_x, val_y),
+        plot=True,
+    )
+    importance = pd.DataFrame(
+        model.get_feature_importance(), index=train_x.columns, columns=["importance"]
+    ).sort_values("importance", ascending=False)
+    print(importance)
+    return importance
 
 
 def accuracy(preds, data, threshold=0.5):
@@ -211,11 +231,11 @@ def run_all():
     train_x = train_data.drop(["y", "id"], axis=1)
     test_x = test_data.drop(["y", "id"], axis=1)
 
-    # # importance結果を算出
-    # importance = get_important_features(train_x, train_y)
-    # selected_feature = list(importance.head(round(len(importance) * 0.1)).index)
-    # selected_train_x = train_x.loc[:, selected_feature]
-    # selected_test_x = test_x.loc[:, selected_feature]
+    # importance結果を算出
+    importance = get_important_features(train_x, train_y)
+    selected_feature = list(importance.head(round(len(importance) * 0.2)).index)
+    train_x = train_x.loc[:, selected_feature]
+    test_x = test_x.loc[:, selected_feature]
 
     # # 学習用のハイパラをチューニング
     # best_params = get_best_params(train_x, train_y)
@@ -226,11 +246,14 @@ def run_all():
     models, acc_results = train(train_x, train_y, kfold)
 
     add_data = np.zeros((len(test_x), 2))
+    pseudo_threshold = 0.8
     for i, model in enumerate(models):
         y_pred = model.predict_proba(test_x)
         add_data += y_pred
     add_data = pd.DataFrame(add_data / len(models))
-    pseudo_label = add_data[(add_data[0] > 0.9) | (add_data[1] > 0.9)].idxmax(
+    pseudo_label = add_data[
+        (add_data[0] > pseudo_threshold) | (add_data[1] > pseudo_threshold)
+    ].idxmax(
         axis=1
     )  # 予測確率の高い行の疑似正解ラベルを取得する
 
@@ -261,7 +284,7 @@ def run_all():
     print("######################################")
     print(f"accuracy avg = {sum(acc_results) / len(acc_results)}")
     print("######################################")
-    submission.to_csv(f"{DATA_DIR}/submission36.csv", index=False)
+    submission.to_csv(f"{DATA_DIR}/submission38.csv", index=False)
 
 
 if __name__ == "__main__":
