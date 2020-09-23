@@ -289,15 +289,6 @@ def run_all():
     train_x = train_data.drop(["y"], axis=1)
     test_x = test_data.drop(["y"], axis=1)
 
-    # # importance結果を算出
-    # importance = get_important_features(train_x, train_y)
-    # selected_feature = list(importance.head(round(len(importance) * 0.1)).index)
-    # selected_train_x = train_x.loc[:, selected_feature]
-    # selected_test_x = test_x.loc[:, selected_feature]
-
-    # # 学習用のハイパラをチューニング
-    # best_params = get_best_params(train_x, train_y)
-
     # 学習
     n_splits = 5
     kfold = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=0)
