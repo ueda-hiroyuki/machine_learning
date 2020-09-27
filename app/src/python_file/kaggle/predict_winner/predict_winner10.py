@@ -1,15 +1,21 @@
 import pandas as pd
 import numpy as np
 import lightgbm as lgb
+import xgboost as xgb
 import matplotlib.pyplot as plt
 import category_encoders as ce
 import optuna  # ハイパーパラメータチューニング自動化ライブラリ
 from tqdm import tqdm
 from functools import partial
-from catboost import CatBoost, Pool, CatBoostClassifier
+
 from optuna.integration import lightgbm_tuner
 from python_file.kaggle.common import common_funcs as cf
-from sklearn.model_selection import train_test_split, StratifiedKFold, KFold
+from sklearn.model_selection import (
+    train_test_split,
+    StratifiedKFold,
+    KFold,
+    GridSearchCV,
+)
 from sklearn.metrics import accuracy_score
 from sklearn.feature_selection import RFECV, RFE
 from python_file.kaggle.predict_winner.common import Common
@@ -55,14 +61,12 @@ cm = Common()
 def train(train_x, train_y, kfold, best_params=None):
     categorical_columns = [x for x in train_x.columns if train_x[x].dtype == "object"]
     params = {
-        "objective": "binary",
-        "boosting_type": "gbdt",
-        "metric": {"binary_logloss"},
+        "objective": "binary:logistic",
+        "eval_metric": "logloss",
         "num_leaves": 50,
         "min_data_in_leaf": 100,
         "learning_rate": 0.1,
         "feature_fraction": 0.7,
-        "is_unbalance": True,
     }
     models = []
     acc_results = []
@@ -72,29 +76,30 @@ def train(train_x, train_y, kfold, best_params=None):
         val_x = train_x.iloc[val_idx].reset_index(drop=True)
         val_y = train_y.iloc[val_idx].reset_index(drop=True)
 
-        model = CatBoostClassifier(
-            iterations=2000,
-            learning_rate=0.1,
-            use_best_model=True,
-            # one_hot_max_size=1000,
-            eval_metric="Accuracy",
-        )
-        model.fit(
-            tr_x,
-            tr_y,
-            # cat_features=categorical_columns,
-            eval_set=(val_x, val_y),
-            plot=True,
+        tr_set = xgb.DMatrix(tr_x, label=tr_y)
+        val_set = xgb.DMatrix(val_x, label=val_y)
+
+        evals_result = {}
+        model = xgb.train(
+            params,
+            tr_set,
+            early_stopping_rounds=200,
+            num_boost_round=10,  # ラウンド数を増やしておく
+            evals=[(tr_set, "train"), (val_set, "eval")],
+            evals_result=evals_result,
+            feval=feval_accuracy,
         )
 
-        y_pred = model.predict(val_x)
-        accuracy = accuracy_score(val_y, y_pred)
+        y_pred_proba = model.predict(val_set)
+        y_pred = np.where(y_pred_proba > 0.5, 1, 0)
+        acc = accuracy_score(val_y, y_pred)
+
         # # 検証結果の描画
         # fig = lgb.plot_metric(evals_result)
         # plt.savefig(f"{DATA_DIR}/learning_curve_{i+1}.png")
 
         models.append(model)
-        acc_results.append(accuracy)
+        acc_results.append(acc)
 
     return models, acc_results
 
@@ -120,13 +125,16 @@ def get_important_features(train_x, train_y):
     return importance
 
 
-def accuracy(preds, data, threshold=0.5):
-    """精度 (Accuracy) を計算する関数"""
-    weight = data.get_weight()
-    true_label = data.get_label()
-    pred_label = (preds > threshold).astype(int)
-    acc = np.average(true_label == pred_label, weights=weight)
-    return "accuracy", acc, True
+def feval_accuracy(pred_proba, dtrain):
+    """カスタムメトリックを計算する関数"""
+    # 真のデータ
+    y_true = dtrain.get_label().astype(int)
+    # 予測
+    y_pred = np.where(pred_proba > 0.5, 1, 0)
+    # Accuracy を計算する
+    acc = accuracy_score(y_true, y_pred)
+    # メトリックの名前と数値を返す(最小化を目指すので 1 から引く)
+    return "accuracy", acc
 
 
 def predict(model, test_x, threshold):
@@ -231,11 +239,13 @@ def run_all():
     train_x = train_data.drop(["y", "id"], axis=1)
     test_x = test_data.drop(["y", "id"], axis=1)
 
-    # importance結果を算出
-    importance = get_important_features(train_x, train_y)
-    selected_feature = list(importance.head(round(len(importance) * 0.2)).index)
-    train_x = train_x.loc[:, selected_feature]
-    test_x = test_x.loc[:, selected_feature]
+    # # importance結果を算出(特徴量の選択)
+    # importance = get_important_features(train_x, train_y)
+    # print(importance.head(round(len(importance) * 0.2)))
+    # selected_feature = list(importance.head(round(len(importance) * 0.2)).index)
+    # train_x = train_x.loc[:, selected_feature]
+    # test_x = test_x.loc[:, selected_feature]
+    # print(train_x)
 
     # # 学習用のハイパラをチューニング
     # best_params = get_best_params(train_x, train_y)
@@ -248,7 +258,7 @@ def run_all():
     add_data = np.zeros((len(test_x), 2))
     pseudo_threshold = 0.8
     for i, model in enumerate(models):
-        y_pred = model.predict_proba(test_x)
+        y_pred = model.predict(test_x)
         add_data += y_pred
     add_data = pd.DataFrame(add_data / len(models))
     pseudo_label = add_data[
@@ -284,7 +294,7 @@ def run_all():
     print("######################################")
     print(f"accuracy avg = {sum(acc_results) / len(acc_results)}")
     print("######################################")
-    submission.to_csv(f"{DATA_DIR}/submission38.csv", index=False)
+    submission.to_csv(f"{DATA_DIR}/submission39.csv", index=False)
 
 
 if __name__ == "__main__":

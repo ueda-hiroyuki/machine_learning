@@ -9,7 +9,12 @@ from functools import partial
 from catboost import CatBoost, Pool, CatBoostClassifier
 from optuna.integration import lightgbm_tuner
 from python_file.kaggle.common import common_funcs as cf
-from sklearn.model_selection import train_test_split, StratifiedKFold, KFold
+from sklearn.model_selection import (
+    train_test_split,
+    StratifiedKFold,
+    KFold,
+    GridSearchCV,
+)
 from sklearn.metrics import accuracy_score
 from sklearn.feature_selection import RFECV, RFE
 from python_file.kaggle.predict_winner.common import Common
@@ -54,16 +59,6 @@ cm = Common()
 
 def train(train_x, train_y, kfold, best_params=None):
     categorical_columns = [x for x in train_x.columns if train_x[x].dtype == "object"]
-    params = {
-        "objective": "binary",
-        "boosting_type": "gbdt",
-        "metric": {"binary_logloss"},
-        "num_leaves": 50,
-        "min_data_in_leaf": 100,
-        "learning_rate": 0.1,
-        "feature_fraction": 0.7,
-        "is_unbalance": True,
-    }
     models = []
     acc_results = []
     for i, (tr_idx, val_idx) in enumerate(kfold.split(train_x, train_y)):
@@ -73,9 +68,11 @@ def train(train_x, train_y, kfold, best_params=None):
         val_y = train_y.iloc[val_idx].reset_index(drop=True)
 
         model = CatBoostClassifier(
-            iterations=2000,
-            learning_rate=0.1,
+            iterations=1000,
             use_best_model=True,
+            depth=best_params["depth"],
+            learning_rate=best_params["learning_rate"],
+            l2_leaf_reg=best_params["l2_leaf_reg"],
             # one_hot_max_size=1000,
             eval_metric="Accuracy",
         )
@@ -97,6 +94,35 @@ def train(train_x, train_y, kfold, best_params=None):
         acc_results.append(accuracy)
 
     return models, acc_results
+
+
+def train_by_grid_search(train_x, train_y, kfold, best_params=None):
+    param_grid = {
+        "depth": [4, 7, 10],
+        "learning_rate": [0.08, 0.1, 0.12],
+        "l2_leaf_reg": [1, 4, 9],
+        "iterations": [1000],
+    }
+    model = CatBoostClassifier(
+        eval_metric="Accuracy",
+    )
+
+    grid_result = GridSearchCV(
+        estimator=model,
+        param_grid=param_grid,
+        scoring="accuracy",
+        cv=kfold,
+        verbose=10,
+        return_train_score=True,
+        n_jobs=4,
+    )
+
+    fit_params = {
+        "eval_set": [[train_x, train_y]],
+    }
+
+    grid_result.fit(train_x, train_y)
+    return grid_result
 
 
 def get_important_features(train_x, train_y):
@@ -231,11 +257,14 @@ def run_all():
     train_x = train_data.drop(["y", "id"], axis=1)
     test_x = test_data.drop(["y", "id"], axis=1)
 
-    # importance結果を算出
-    importance = get_important_features(train_x, train_y)
-    selected_feature = list(importance.head(round(len(importance) * 0.2)).index)
-    train_x = train_x.loc[:, selected_feature]
-    test_x = test_x.loc[:, selected_feature]
+    # # importance結果を算出(特徴量の選択)
+    # feature_ratio = 0.5
+    # importance = get_important_features(train_x, train_y)
+    # selected_feature = list(
+    #     importance.head(round(len(importance) * feature_ratio)).index
+    # )
+    # train_x = train_x.loc[:, selected_feature]
+    # test_x = test_x.loc[:, selected_feature]
 
     # # 学習用のハイパラをチューニング
     # best_params = get_best_params(train_x, train_y)
@@ -243,14 +272,17 @@ def run_all():
     # 学習
     n_splits = 5
     kfold = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=0)
-    models, acc_results = train(train_x, train_y, kfold)
 
-    add_data = np.zeros((len(test_x), 2))
+    # Grid Search
+    grid_result = train_by_grid_search(train_x, train_y, kfold)
+    best_estimator = grid_result.best_estimator_
+    best_params = grid_result.best_params_
+    pred = best_estimator.predict_proba(test_x)
+
+    # pseudo_labeling
     pseudo_threshold = 0.8
-    for i, model in enumerate(models):
-        y_pred = model.predict_proba(test_x)
-        add_data += y_pred
-    add_data = pd.DataFrame(add_data / len(models))
+    add_data = pd.DataFrame(pred)
+
     pseudo_label = add_data[
         (add_data[0] > pseudo_threshold) | (add_data[1] > pseudo_threshold)
     ].idxmax(
@@ -267,7 +299,7 @@ def run_all():
     new_train_y = pd.concat([train_y, pseudo_label], axis=0).reset_index(drop=True)
 
     # pseudo_labeling後の再学習
-    models, acc_results = train(new_train_x, new_train_y, kfold)
+    models, acc_results = train(new_train_x, new_train_y, kfold, best_params)
 
     # 評価
     threshold = 0.5
@@ -283,8 +315,9 @@ def run_all():
     print(submission)
     print("######################################")
     print(f"accuracy avg = {sum(acc_results) / len(acc_results)}")
+    print(f"best params = {best_params}")
     print("######################################")
-    submission.to_csv(f"{DATA_DIR}/submission38.csv", index=False)
+    submission.to_csv(f"{DATA_DIR}/submission39.csv", index=False)
 
 
 if __name__ == "__main__":
