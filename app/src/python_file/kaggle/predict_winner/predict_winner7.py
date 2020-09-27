@@ -53,17 +53,6 @@ cm = Common()
 
 
 def train(train_x, train_y, kfold, best_params=None):
-    categorical_columns = [x for x in train_x.columns if train_x[x].dtype == "object"]
-    params = {
-        "objective": "binary",
-        "boosting_type": "gbdt",
-        "metric": {"binary_logloss"},
-        "num_leaves": 50,
-        "min_data_in_leaf": 100,
-        "learning_rate": 0.1,
-        "feature_fraction": 0.7,
-        "is_unbalance": True,
-    }
     models = []
     acc_results = []
     for i, (tr_idx, val_idx) in enumerate(kfold.split(train_x, train_y)):
@@ -73,16 +62,14 @@ def train(train_x, train_y, kfold, best_params=None):
         val_y = train_y.iloc[val_idx].reset_index(drop=True)
 
         model = CatBoostClassifier(
-            iterations=2000,
-            learning_rate=0.1,
+            **best_params,
             use_best_model=True,
-            # one_hot_max_size=1000,
             eval_metric="Accuracy",
+            iterations=1000,
         )
         model.fit(
             tr_x,
             tr_y,
-            # cat_features=categorical_columns,
             eval_set=(val_x, val_y),
             plot=True,
         )
@@ -99,25 +86,34 @@ def train(train_x, train_y, kfold, best_params=None):
     return models, acc_results
 
 
-def get_important_features(train_x, train_y):
-    tr_x, val_x, tr_y, val_y = train_test_split(train_x, train_y, random_state=1)
-    model = CatBoostClassifier(
-        iterations=1000,
-        learning_rate=0.1,
-        use_best_model=True,
-        eval_metric="Accuracy",
-    )
-    model.fit(
-        tr_x,
-        tr_y,
-        eval_set=(val_x, val_y),
-        plot=True,
-    )
-    importance = pd.DataFrame(
-        model.get_feature_importance(), index=train_x.columns, columns=["importance"]
-    ).sort_values("importance", ascending=False)
-    print(importance)
-    return importance
+def objective(X, y, trial):
+    # trainデータとvalidデータを分割
+    train_x, val_x, train_y, val_y = train_test_split(X, y, test_size=0.2)
+    train_pool = Pool(train_x, train_y)
+    val_pool = Pool(val_x, val_y)
+
+    # パラメータの指定
+    params = {
+        # "iterations": trial.suggest_int("iterations", 200, 1000),
+        "depth": trial.suggest_int("depth", 4, 10),
+        "learning_rate": trial.suggest_loguniform("learning_rate", 0.01, 0.3),
+        "random_strength": trial.suggest_int("random_strength", 0, 100),
+        "bagging_temperature": trial.suggest_loguniform(
+            "bagging_temperature", 0.01, 100.00
+        ),
+        "od_type": trial.suggest_categorical("od_type", ["IncToDec", "Iter"]),
+        "od_wait": trial.suggest_int("od_wait", 10, 50),
+    }
+
+    # 学習
+    model = CatBoostClassifier(**params)
+    model.fit(train_pool)
+    # 予測
+    preds = model.predict(val_pool)
+    pred_labels = np.rint(preds)
+    # 精度の計算
+    accuracy = accuracy_score(val_y, pred_labels)
+    return 1.0 - accuracy
 
 
 def accuracy(preds, data, threshold=0.5):
@@ -231,19 +227,17 @@ def run_all():
     train_x = train_data.drop(["y", "id"], axis=1)
     test_x = test_data.drop(["y", "id"], axis=1)
 
-    # importance結果を算出
-    importance = get_important_features(train_x, train_y)
-    selected_feature = list(importance.head(round(len(importance) * 0.2)).index)
-    train_x = train_x.loc[:, selected_feature]
-    test_x = test_x.loc[:, selected_feature]
+    f = partial(objective, train_x, train_y)  # 目的関数に引数を固定しておく
+    study = optuna.create_study(direction="maximize")  # Optuna で取り出す特徴量の数を最適化する
 
-    # # 学習用のハイパラをチューニング
-    # best_params = get_best_params(train_x, train_y)
+    study.optimize(f, n_trials=10)  # 試行回数を決定する
+    print("params:", study.best_params)  # 発見したパラメータを出力する
+    best_params = study.best_params  # Optunaで最適化したパラメータ
 
     # 学習
     n_splits = 5
     kfold = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=0)
-    models, acc_results = train(train_x, train_y, kfold)
+    models, acc_results = train(train_x, train_y, kfold, best_params)
 
     add_data = np.zeros((len(test_x), 2))
     pseudo_threshold = 0.8
@@ -267,7 +261,7 @@ def run_all():
     new_train_y = pd.concat([train_y, pseudo_label], axis=0).reset_index(drop=True)
 
     # pseudo_labeling後の再学習
-    models, acc_results = train(new_train_x, new_train_y, kfold)
+    models, acc_results = train(new_train_x, new_train_y, kfold, best_params)
 
     # 評価
     threshold = 0.5
@@ -283,8 +277,9 @@ def run_all():
     print(submission)
     print("######################################")
     print(f"accuracy avg = {sum(acc_results) / len(acc_results)}")
+    print(f"best_params = {best_params}")
     print("######################################")
-    submission.to_csv(f"{DATA_DIR}/submission38.csv", index=False)
+    submission.to_csv(f"{DATA_DIR}/submission39.csv", index=False)
 
 
 if __name__ == "__main__":
