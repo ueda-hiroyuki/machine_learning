@@ -2,29 +2,25 @@ import joblib
 import pandas as pd
 import numpy as np
 import lightgbm as lgb
-import xgboost as xgb
 import matplotlib.pyplot as plt
 import category_encoders as ce
-import optuna  # ハイパーパラメータチューニング自動化ライブラリ
-from tqdm import tqdm
+from glob import glob
 from functools import partial
-from sklearn.ensemble import RandomForestClassifier
-from optuna.integration import lightgbm_tuner
 from python_file.kaggle.common import common_funcs as cf
-from sklearn.model_selection import (
-    train_test_split,
-    StratifiedKFold,
-    KFold,
-    GridSearchCV,
-)
+from sklearn.model_selection import train_test_split, StratifiedKFold, KFold
+from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score
-from sklearn.feature_selection import RFECV, RFE
 from python_file.kaggle.predict_winner.common import Common
+from sklearn.ensemble import RandomForestClassifier
+from catboost import CatBoost, Pool, CatBoostClassifier
+from sklearn.ensemble import StackingClassifier
+
 
 DATA_DIR = "src/sample_data/Kaggle/predict_winner"
 TRAIN_PATH = f"{DATA_DIR}/train_data.csv"
 TEST_PATH = f"{DATA_DIR}/test_data.csv"
 BUKI_PATH = f"{DATA_DIR}/weapon.csv"
+
 REMOVAL_COLS = ["lobby", "game-ver", "period"]
 
 WEAPON_MAP = {
@@ -59,16 +55,26 @@ RANK_MAP = {
 cm = Common()
 
 
-def train(train_x, train_y, kfold, best_params=None, algorithm_name=None):
-    categorical_columns = [x for x in train_x.columns if train_x[x].dtype == "object"]
-    params = {
-        "objective": "binary:logistic",
-        "eval_metric": "logloss",
-        "num_leaves": 50,
-        "min_data_in_leaf": 100,
-        "learning_rate": 0.1,
-        "feature_fraction": 0.7,
-    }
+def accuracy(preds, data, threshold=0.5):
+    """精度 (Accuracy) を計算する関数"""
+    weight = data.get_weight()
+    true_label = data.get_label()
+    pred_label = (preds > threshold).astype(int)
+    acc = np.average(true_label == pred_label, weights=weight)
+    return "accuracy", acc, True
+
+
+def load_model(num, data_dir, algorithm_name):
+    all_models = []
+    for i in range(num):
+        model = joblib.load(f"{data_dir}/{algorithm_name}_model_{i}.pkl")
+        all_models.append((f"{algorithm_name}{i}", model))
+    return all_models
+
+
+def train_by_randomforest(
+    train_x, train_y, kfold, best_params=None, algorithm_name=None
+):
     models = []
     acc_results = []
     for i, (tr_idx, val_idx) in enumerate(kfold.split(train_x, train_y)):
@@ -92,23 +98,94 @@ def train(train_x, train_y, kfold, best_params=None, algorithm_name=None):
 
         y_pred = model.predict(val_x)
         accuracy = accuracy_score(val_y, y_pred)
-        # # 検証結果の描画
-        # fig = lgb.plot_metric(evals_result)
-        # plt.savefig(f"{DATA_DIR}/learning_curve_{i+1}.png")
-
-        if algorithm_name is not None:
-            joblib.dump(model, f"{DATA_DIR}/{algorithm_name}_model_{i}.pkl")
-
         models.append(model)
         acc_results.append(accuracy)
 
     return models, acc_results
 
 
-def predict(model, test_x, threshold):
-    y_pred = model.predict(test_x)
-    pred = [0 if i < threshold else 1 for i in y_pred]
-    return pd.Series(pred)
+def train_by_lightgbm(train_x, train_y, kfold, best_params=None, algorithm_name=None):
+    params = {
+        "objective": "binary",
+        "boosting_type": "gbdt",
+        "metric": {"binary_logloss"},
+        "num_leaves": 50,
+        "min_data_in_leaf": 100,
+        "learning_rate": 0.1,
+        "feature_fraction": 0.7,
+        "is_unbalance": True,
+    }
+    models = []
+    acc_results = []
+    for i, (tr_idx, val_idx) in enumerate(kfold.split(train_x, train_y)):
+        tr_x = train_x.iloc[tr_idx].reset_index(drop=True)
+        tr_y = train_y.iloc[tr_idx].reset_index(drop=True)
+        val_x = train_x.iloc[val_idx].reset_index(drop=True)
+        val_y = train_y.iloc[val_idx].reset_index(drop=True)
+
+        tr_set = lgb.Dataset(tr_x, tr_y)
+        val_set = lgb.Dataset(val_x, val_y, reference=tr_set)
+
+        evals_result = {}
+        model = lgb.train(
+            params=params,
+            train_set=tr_set,
+            valid_sets=[val_set, tr_set],
+            valid_names=["eval", "train"],
+            num_boost_round=1000,
+            early_stopping_rounds=100,
+            verbose_eval=1,
+            evals_result=evals_result,
+            feval=accuracy,
+        )
+
+        models.append(model)
+        acc_results.append(max(evals_result["eval"]["accuracy"]))
+
+    return models, acc_results
+
+
+def train_by_catboost(train_x, train_y, kfold, best_params=None, algorithm_name=None):
+    categorical_columns = [x for x in train_x.columns if train_x[x].dtype == "object"]
+    params = {
+        "objective": "binary",
+        "boosting_type": "gbdt",
+        "metric": {"binary_logloss"},
+        "num_leaves": 50,
+        "min_data_in_leaf": 100,
+        "learning_rate": 0.1,
+        "feature_fraction": 0.7,
+        "is_unbalance": True,
+    }
+    models = []
+    acc_results = []
+    for i, (tr_idx, val_idx) in enumerate(kfold.split(train_x, train_y)):
+        tr_x = train_x.iloc[tr_idx].reset_index(drop=True)
+        tr_y = train_y.iloc[tr_idx].reset_index(drop=True)
+        val_x = train_x.iloc[val_idx].reset_index(drop=True)
+        val_y = train_y.iloc[val_idx].reset_index(drop=True)
+
+        model = CatBoostClassifier(
+            iterations=2000,
+            learning_rate=0.1,
+            use_best_model=True,
+            # one_hot_max_size=1000,
+            eval_metric="Accuracy",
+        )
+        model.fit(
+            tr_x,
+            tr_y,
+            # cat_features=categorical_columns,
+            eval_set=(val_x, val_y),
+            plot=True,
+        )
+
+        y_pred = model.predict(val_x)
+        accuracy = accuracy_score(val_y, y_pred)
+        models.append(model)
+        acc_results.append(accuracy)
+
+    return models, acc_results
 
 
 def run_all():
@@ -203,68 +280,33 @@ def run_all():
 
     ids = test_data.loc[:, "id"]
 
-    train_y = train_data.loc[:, "y"]
-    train_x = train_data.drop(["y", "id"], axis=1)
+    y = train_data.loc[:, "y"]
+    X = train_data.drop(["y", "id"], axis=1)
     test_x = test_data.drop(["y", "id"], axis=1)
 
-    # # 学習用のハイパラをチューニング
-    # best_params = get_best_params(train_x, train_y)
+    # aaa = train_test_split(X, y, test_size=0.2, stratify=y)
+    lgb_models = load_model(num=5, data_dir=DATA_DIR, algorithm_name="lightgbm")
+    cb_models = load_model(num=5, data_dir=DATA_DIR, algorithm_name="catboost")
+    rf_models = load_model(num=5, data_dir=DATA_DIR, algorithm_name="randomforest")
+    all_models = [*lgb_models, *cb_models, *rf_models]
 
-    # 学習
-    n_splits = 5
-    algorithm_name = "randomforest"
-    kfold = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=0)
-    models, acc_results = train(
-        train_x=train_x,
-        train_y=train_y,
-        kfold=kfold,
+    meta_model = LogisticRegression(
+        penalty="l2",
+        C=0.01,
+        max_iter=200,
+        verbose=10,
+        n_jobs=4,
     )
 
-    add_data = np.zeros((len(test_x), 2))
-    pseudo_threshold = 0.8
-    for i, model in enumerate(models):
-        y_pred = model.predict_proba(test_x)
-        add_data += y_pred
-    add_data = pd.DataFrame(add_data / len(models))
-    pseudo_label = add_data[
-        (add_data[0] > pseudo_threshold) | (add_data[1] > pseudo_threshold)
-    ].idxmax(
-        axis=1
-    )  # 予測確率の高い行の疑似正解ラベルを取得する
-
-    pseudo_data = pd.concat(
-        [test_x.iloc[pseudo_label.index], pseudo_label], axis=1
-    ).rename(columns={0: "y"})
-
-    new_train_x = pd.concat(
-        [train_x, pseudo_data.drop("y", axis=1)], axis=0
-    ).reset_index(drop=True)
-    new_train_y = pd.concat([train_y, pseudo_label], axis=0).reset_index(drop=True)
-
-    # pseudo_labeling後の再学習
-    models, acc_results = train(
-        train_x=new_train_x,
-        train_y=new_train_y,
-        kfold=kfold,
-        algorithm_name=algorithm_name,
+    clf = StackingClassifier(
+        estimators=all_models,
+        final_estimator=meta_model,
     )
+    print(all_models)
+    clf.fit(X, y)
+    y_pred = clf.predict(test_x)
 
-    # 評価
-    threshold = 0.5
-    y_preds = []
-    for i, model in enumerate(models):
-        y_pred = predict(model, test_x, threshold)
-        y_preds.append(y_pred)
-
-    # 提出用ファイル成型
-    winner_pred = pd.concat(y_preds, axis=1).mode(axis=1).rename(columns={0: "y"})
-    submission = pd.concat([ids, winner_pred], axis=1)
-
-    print(submission)
-    print("######################################")
-    print(f"accuracy avg = {sum(acc_results) / len(acc_results)}")
-    print("######################################")
-    # submission.to_csv(f"{DATA_DIR}/submission40.csv", index=False)
+    print(y_pred)
 
 
 if __name__ == "__main__":

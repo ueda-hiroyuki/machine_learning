@@ -1,3 +1,4 @@
+import joblib
 import pandas as pd
 import numpy as np
 import lightgbm as lgb
@@ -52,7 +53,19 @@ RANK_MAP = {
 cm = Common()
 
 
-def train(train_x, train_y, kfold, best_params=None):
+def train(train_x, train_y, kfold, best_params=None, algorithm_name=None):
+    print(train_x.dtypes)
+    categorical_columns = [x for x in train_x.columns if train_x[x].dtype == "object"]
+    params = {
+        "objective": "binary",
+        "boosting_type": "gbdt",
+        "metric": {"binary_logloss"},
+        "num_leaves": 50,
+        "min_data_in_leaf": 100,
+        "learning_rate": 0.1,
+        "feature_fraction": 0.7,
+        "is_unbalance": True,
+    }
     models = []
     acc_results = []
     for i, (tr_idx, val_idx) in enumerate(kfold.split(train_x, train_y)):
@@ -62,14 +75,16 @@ def train(train_x, train_y, kfold, best_params=None):
         val_y = train_y.iloc[val_idx].reset_index(drop=True)
 
         model = CatBoostClassifier(
-            **best_params,
+            iterations=2000,
+            learning_rate=0.1,
             use_best_model=True,
+            # one_hot_max_size=1000,
             eval_metric="Accuracy",
-            iterations=1000,
         )
         model.fit(
             tr_x,
             tr_y,
+            # cat_features=categorical_columns,
             eval_set=(val_x, val_y),
             plot=True,
         )
@@ -80,40 +95,13 @@ def train(train_x, train_y, kfold, best_params=None):
         # fig = lgb.plot_metric(evals_result)
         # plt.savefig(f"{DATA_DIR}/learning_curve_{i+1}.png")
 
+        if algorithm_name is not None:
+            joblib.dump(model, f"{DATA_DIR}/{algorithm_name}_model_{i}.pkl")
+
         models.append(model)
         acc_results.append(accuracy)
 
     return models, acc_results
-
-
-def objective(X, y, trial):
-    # trainデータとvalidデータを分割
-    train_x, val_x, train_y, val_y = train_test_split(X, y, test_size=0.2)
-    train_pool = Pool(train_x, train_y)
-    val_pool = Pool(val_x, val_y)
-
-    # パラメータの指定
-    params = {
-        # "iterations": trial.suggest_int("iterations", 200, 1000),
-        "depth": trial.suggest_int("depth", 4, 10),
-        "learning_rate": trial.suggest_loguniform("learning_rate", 0.01, 0.3),
-        "random_strength": trial.suggest_int("random_strength", 0, 100),
-        "bagging_temperature": trial.suggest_loguniform(
-            "bagging_temperature", 0.01, 100.00
-        ),
-        "od_type": trial.suggest_categorical("od_type", ["IncToDec", "Iter"]),
-        "od_wait": trial.suggest_int("od_wait", 10, 50),
-    }
-
-    # 学習
-    model = CatBoostClassifier(**params)
-    model.fit(train_pool)
-    # 予測
-    preds = model.predict(val_pool)
-    pred_labels = np.rint(preds)
-    # 精度の計算
-    accuracy = accuracy_score(val_y, pred_labels)
-    return 1.0 - accuracy
 
 
 def accuracy(preds, data, threshold=0.5):
@@ -227,27 +215,27 @@ def run_all():
     train_x = train_data.drop(["y", "id"], axis=1)
     test_x = test_data.drop(["y", "id"], axis=1)
 
-    f = partial(objective, train_x, train_y)  # 目的関数に引数を固定しておく
-    study = optuna.create_study(direction="maximize")  # Optuna で取り出す特徴量の数を最適化する
+    # # importance結果を算出
+    # importance = get_important_features(train_x, train_y)
+    # selected_feature = list(importance.head(round(len(importance) * 0.1)).index)
+    # selected_train_x = train_x.loc[:, selected_feature]
+    # selected_test_x = test_x.loc[:, selected_feature]
 
-    study.optimize(f, n_trials=10)  # 試行回数を決定する
-    print("params:", study.best_params)  # 発見したパラメータを出力する
-    best_params = study.best_params  # Optunaで最適化したパラメータ
+    # # 学習用のハイパラをチューニング
+    # best_params = get_best_params(train_x, train_y)
 
     # 学習
     n_splits = 5
+    algorithm_name = "catboost"
     kfold = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=0)
-    models, acc_results = train(train_x, train_y, kfold, best_params)
+    models, acc_results = train(train_x, train_y, kfold)
 
     add_data = np.zeros((len(test_x), 2))
-    pseudo_threshold = 0.8
     for i, model in enumerate(models):
         y_pred = model.predict_proba(test_x)
         add_data += y_pred
     add_data = pd.DataFrame(add_data / len(models))
-    pseudo_label = add_data[
-        (add_data[0] > pseudo_threshold) | (add_data[1] > pseudo_threshold)
-    ].idxmax(
+    pseudo_label = add_data[(add_data[0] > 0.8) | (add_data[1] > 0.8)].idxmax(
         axis=1
     )  # 予測確率の高い行の疑似正解ラベルを取得する
 
@@ -261,7 +249,12 @@ def run_all():
     new_train_y = pd.concat([train_y, pseudo_label], axis=0).reset_index(drop=True)
 
     # pseudo_labeling後の再学習
-    models, acc_results = train(new_train_x, new_train_y, kfold, best_params)
+    models, acc_results = train(
+        train_x=new_train_x,
+        train_y=new_train_y,
+        kfold=kfold,
+        algorithm_name=algorithm_name,
+    )
 
     # 評価
     threshold = 0.5
@@ -277,9 +270,8 @@ def run_all():
     print(submission)
     print("######################################")
     print(f"accuracy avg = {sum(acc_results) / len(acc_results)}")
-    print(f"best_params = {best_params}")
     print("######################################")
-    submission.to_csv(f"{DATA_DIR}/submission39.csv", index=False)
+    submission.to_csv(f"{DATA_DIR}/submission40.csv", index=False)
 
 
 if __name__ == "__main__":

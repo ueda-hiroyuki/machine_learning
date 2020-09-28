@@ -1,3 +1,4 @@
+import joblib
 import pandas as pd
 import numpy as np
 import lightgbm as lgb
@@ -123,7 +124,7 @@ def objective(X, y, trial):
     return accuracy
 
 
-def train(train_x, train_y, kfold, best_params=None):
+def train(train_x, train_y, kfold, best_params=None, algorithm_name=None):
     params = {
         "objective": "binary",
         "boosting_type": "gbdt",
@@ -151,23 +152,23 @@ def train(train_x, train_y, kfold, best_params=None):
             train_set=tr_set,
             valid_sets=[val_set, tr_set],
             valid_names=["eval", "train"],
-            num_boost_round=10000,
+            num_boost_round=1000,
             early_stopping_rounds=100,
             verbose_eval=1,
             evals_result=evals_result,
             feval=accuracy,
         )
 
-        importance = pd.DataFrame(
-            model.feature_importance(), index=train_x.columns, columns=["importance"]
-        ).sort_values("importance", ascending=[False])
+        # importance = pd.DataFrame(
+        #     model.feature_importance(), index=train_x.columns, columns=["importance"]
+        # ).sort_values("importance", ascending=[False])
 
-        # print(f"######################importance#####################")
-        # print(importance.head(50))
+        # # 検証結果の描画
+        # fig = lgb.plot_metric(evals_result)
+        # plt.savefig(f"{DATA_DIR}/learning_curve_{i+1}.png")
 
-        # 検証結果の描画
-        fig = lgb.plot_metric(evals_result)
-        plt.savefig(f"{DATA_DIR}/learning_curve_{i+1}.png")
+        if algorithm_name is not None:
+            joblib.dump(model, f"{DATA_DIR}/{algorithm_name}_model_{i}.pkl")
 
         models.append(model)
         acc_results.append(max(evals_result["eval"]["accuracy"]))
@@ -262,8 +263,8 @@ def run_all():
     data = cm.calc_team_level_avg(raw_data)
     data = cm.calc_team_rank_avg(data)
     data = cm.add_count_range_distance(data, buki_range_distance_dict)
-    # data = cm.calc_weapons_win_rate_avg(data, win_rate_dict)
-    # data = cm.calc_weapons_win_rate_avg_per_mode(data, win_rate_mode_df)
+    data = cm.calc_weapons_win_rate_avg(data, win_rate_dict)
+    data = cm.calc_weapons_win_rate_avg_per_mode(data, win_rate_mode_df)
 
     categorical_columns = [x for x in data.columns if data[x].dtype == "object"]
 
@@ -281,8 +282,6 @@ def run_all():
         .reset_index(drop=True)
     )
 
-    print(train_data, test_data)
-
     ids = test_data.loc[:, "id"]
 
     train_y = train_data.loc[:, "y"]
@@ -291,8 +290,43 @@ def run_all():
 
     # 学習
     n_splits = 5
+    algorithm_name = "lightgbm"
     kfold = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=0)
-    models, acc_results = train(train_x, train_y, kfold)
+    models, acc_results = train(
+        train_x=train_x,
+        train_y=train_y,
+        kfold=kfold,
+    )
+
+    add_data = np.zeros((len(test_x), 2))
+    pseudo_threshold = 0.8
+    for i, model in enumerate(models):
+        y_pred = [[1 - r, r] for r in model.predict(test_x)]
+        add_data += y_pred
+
+    add_data = pd.DataFrame(add_data / len(models))
+    pseudo_label = add_data[
+        (add_data[0] > pseudo_threshold) | (add_data[1] > pseudo_threshold)
+    ].idxmax(
+        axis=1
+    )  # 予測確率の高い行の疑似正解ラベルを取得する
+
+    pseudo_data = pd.concat(
+        [test_x.iloc[pseudo_label.index], pseudo_label], axis=1
+    ).rename(columns={0: "y"})
+
+    new_train_x = pd.concat(
+        [train_x, pseudo_data.drop("y", axis=1)], axis=0
+    ).reset_index(drop=True)
+    new_train_y = pd.concat([train_y, pseudo_label], axis=0).reset_index(drop=True)
+
+    # pseudo_labeling後の再学習
+    models, acc_results = train(
+        train_x=new_train_x,
+        train_y=new_train_y,
+        kfold=kfold,
+        algorithm_name=algorithm_name,
+    )
 
     # 評価
     threshold = 0.5
@@ -309,7 +343,7 @@ def run_all():
     print("######################################")
     print(f"accuracy avg = {sum(acc_results) / len(acc_results)}")
     print("######################################")
-    submission.to_csv(f"{DATA_DIR}/submission24.csv", index=False)
+    # # submission.to_csv(f"{DATA_DIR}/submission24.csv", index=False)
 
 
 if __name__ == "__main__":
