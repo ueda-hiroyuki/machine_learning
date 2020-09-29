@@ -285,10 +285,6 @@ def run_all():
     test_x = test_data.drop(["y", "id"], axis=1)
 
     # aaa = train_test_split(X, y, test_size=0.2, stratify=y)
-    lgb_models = load_model(num=5, data_dir=DATA_DIR, algorithm_name="lightgbm")
-    cb_models = load_model(num=5, data_dir=DATA_DIR, algorithm_name="catboost")
-    rf_models = load_model(num=5, data_dir=DATA_DIR, algorithm_name="randomforest")
-    all_models = [*lgb_models, *cb_models, *rf_models]
 
     meta_model = LogisticRegression(
         penalty="l2",
@@ -297,16 +293,6 @@ def run_all():
         verbose=10,
         n_jobs=4,
     )
-
-    clf = StackingClassifier(
-        estimators=all_models,
-        final_estimator=meta_model,
-    )
-    print(all_models)
-    clf.fit(X, y)
-    y_pred = clf.predict(test_x)
-
-    print(y_pred)
 
 
 if __name__ == "__main__":
