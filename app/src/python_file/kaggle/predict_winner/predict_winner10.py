@@ -264,7 +264,7 @@ def run_all():
     print("######################################")
     print(f"accuracy avg = {sum(acc_results) / len(acc_results)}")
     print("######################################")
-    # submission.to_csv(f"{DATA_DIR}/submission40.csv", index=False)
+    submission.to_csv(f"{DATA_DIR}/submission40.csv", index=False)
 
 
 if __name__ == "__main__":
