@@ -126,7 +126,7 @@ def detect_adversarital_idx(train_x, test_x):
     ].index  # trainデータの中でテストっぽいデータだと判断された行のindex
 
     pred_train_idx = (
-        adv_train.loc[:, "test"].sort_values(ascending=False).head(20000).index
+        adv_train.loc[:, "test"].sort_values(ascending=False).head(55000).index
     )
     return pred_train_idx
 
@@ -236,7 +236,7 @@ def run_all():
     n_splits = 5
     algorithm_name = "catboost"
     kfold = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=0)
-    models, acc_results = train(train_x, train_y, kfold)
+    models, acc_results = train(selected_train_x, selected_train_y, kfold)
 
     add_data = np.zeros((len(test_x), 2))
     for i, model in enumerate(models):
@@ -252,9 +252,11 @@ def run_all():
     ).rename(columns={0: "y"})
 
     new_train_x = pd.concat(
-        [train_x, pseudo_data.drop("y", axis=1)], axis=0
+        [selected_train_x, pseudo_data.drop("y", axis=1)], axis=0
     ).reset_index(drop=True)
-    new_train_y = pd.concat([train_y, pseudo_label], axis=0).reset_index(drop=True)
+    new_train_y = pd.concat([selected_train_y, pseudo_label], axis=0).reset_index(
+        drop=True
+    )
 
     # pseudo_labeling後の再学習
     models, acc_results = train(
@@ -279,7 +281,7 @@ def run_all():
     print("######################################")
     print(f"accuracy avg = {sum(acc_results) / len(acc_results)}")
     print("######################################")
-    submission.to_csv(f"{DATA_DIR}/submission41.csv", index=False)
+    submission.to_csv(f"{DATA_DIR}/submission42.csv", index=False)
 
 
 if __name__ == "__main__":
