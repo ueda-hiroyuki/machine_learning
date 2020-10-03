@@ -277,11 +277,11 @@ def run_train_and_stacking(X, y, test_x):
     rf_base_models, rf_base_preds_valid = train_by_randomforest(X, y, kfold)
     nn_base_models, nn_base_preds_valid = train_by_neuralnet(X, y, kfold)
 
-    # # pseudo_labeling
-    # cat_new_X, cat_new_y = gen_pseudo_label(cat_base_models, X, y, test_x)
-    # lgb_new_X, lgb_new_y = gen_pseudo_label(lgb_base_models, X, y, test_x, True)
-    # rf_new_X, rf_new_y = gen_pseudo_label(rf_base_models, X, y, test_x)
-    # nn_new_X, nn_new_y = gen_pseudo_label(nn_base_models, X, y, test_x)
+    # pseudo_labeling
+    cat_new_X, cat_new_y = gen_pseudo_label(cat_base_models, X, y, test_x)
+    lgb_new_X, lgb_new_y = gen_pseudo_label(lgb_base_models, X, y, test_x, True)
+    rf_new_X, rf_new_y = gen_pseudo_label(rf_base_models, X, y, test_x)
+    nn_new_X, nn_new_y = gen_pseudo_label(nn_base_models, X, y, test_x)
 
     # pseudo_labeling後の再学習
     cat_base_models, cat_base_preds_valid = train_by_catboost(
