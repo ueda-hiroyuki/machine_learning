@@ -54,18 +54,6 @@ cm = Common()
 
 
 def train(train_x, train_y, kfold, best_params=None, algorithm_name=None):
-    print(train_x.dtypes)
-    categorical_columns = [x for x in train_x.columns if train_x[x].dtype == "object"]
-    params = {
-        "objective": "binary",
-        "boosting_type": "gbdt",
-        "metric": {"binary_logloss"},
-        "num_leaves": 50,
-        "min_data_in_leaf": 100,
-        "learning_rate": 0.1,
-        "feature_fraction": 0.7,
-        "is_unbalance": True,
-    }
     models = []
     acc_results = []
     for i, (tr_idx, val_idx) in enumerate(kfold.split(train_x, train_y)):
