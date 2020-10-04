@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import lightgbm as lgb
 import matplotlib.pyplot as plt
+import matplotlib.cm as cm
 import category_encoders as ce
 import optuna  # ハイパーパラメータチューニング自動化ライブラリ
 from tqdm import tqdm
@@ -14,6 +15,7 @@ from sklearn.model_selection import train_test_split, StratifiedKFold, KFold
 from sklearn.metrics import accuracy_score
 from sklearn.feature_selection import RFECV, RFE
 from sklearn.decomposition import PCA
+from umap import UMAP
 from python_file.kaggle.predict_winner.common import Common
 
 DATA_DIR = "src/sample_data/Kaggle/predict_winner"
@@ -52,6 +54,32 @@ RANK_MAP = {
 }
 
 cm = Common()
+
+
+def run_dimention_reduction(train_x, test_x, train_y):
+    """
+    次元削減を行う関数(PCA ⇒ UMAP)
+    """
+    # 始めにPCAで元の1/2に次元削減する
+    n_components = round(len(train_x.columns) * 0.5)
+    pca = PCA(n_components=n_components).fit(train_x)
+    reduced_train_x = pd.DataFrame(pca.transform(train_x))
+    reduced_test_x = pd.DataFrame(pca.transform(test_x))
+
+    # UMAPで2次元に削減
+    reducer = UMAP(random_state=0)
+    reducer.fit(reduced_train_x)
+    reduced_train_x = pd.DataFrame(reducer.transform(reduced_train_x))
+    reduced_test_x = pd.DataFrame(reducer.transform(reduced_test_x))
+    reduced_train_x.columns = ["umap_train_1", "umap_train_2"]
+    reduced_test_x.columns = ["umap_test_1", "umap_test_2"]
+
+    # df = pd.concat([reduced_train_x, train_y], axis=1)
+    # plt.figure()
+    # plt.scatter(df.loc[:, 0], df.loc[:, 1], c=df.loc[:, "y"])
+    # plt.colorbar()
+    # plt.savefig(f"{DATA_DIR}/dimension_reduction.png")
+    return reduced_train_x, reduced_test_x
 
 
 def objective(X, y, trial):
@@ -239,24 +267,29 @@ def run_all():
     train_x = train_data.drop(["y", "id"], axis=1)
     test_x = test_data.drop(["y", "id"], axis=1)
 
-    f = partial(objective, train_x, train_y)  # 目的関数に引数を固定しておく
-    study = optuna.create_study(direction="maximize")  # Optuna で取り出す特徴量の数を最適化する
+    # UMAPで次元削減
+    reduced_train_x, reduced_test_x = run_dimention_reduction(train_x, test_x, train_y)
+    train_x = pd.concat([train_x, reduced_train_x], axis=1)  # 次元削減した特徴量を追加
+    test_x = pd.concat([test_x, reduced_test_x], axis=1)  # 次元削減した特徴量を追加
 
-    study.optimize(f, n_trials=10)  # 試行回数を決定する
-    best_feature_count = study.best_params["n_components"]
-    train_x_pca, test_x_pca = get_important_features(
-        train_x, test_x, best_feature_count
-    )
+    # f = partial(objective, train_x, train_y)  # 目的関数に引数を固定しておく
+    # study = optuna.create_study(direction="maximize")  # Optuna で取り出す特徴量の数を最適化する
+
+    # study.optimize(f, n_trials=10)  # 試行回数を決定する
+    # best_feature_count = study.best_params["n_components"]
+    # train_x_pca, test_x_pca = get_important_features(
+    #     train_x, test_x, best_feature_count
+    # )
 
     # 学習
     n_splits = 5
     algorithm_name = "catboost"
     kfold = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=0)
-    models, acc_results = train(train_x_pca, train_y, kfold)
+    models, acc_results = train(train_x, train_y, kfold)
 
-    add_data = np.zeros((len(test_x_pca), 2))
+    add_data = np.zeros((len(test_x), 2))
     for i, model in enumerate(models):
-        y_pred = model.predict_proba(test_x_pca)
+        y_pred = model.predict_proba(test_x)
         add_data += y_pred
     add_data = pd.DataFrame(add_data / len(models))
     pseudo_label = add_data[(add_data[0] > 0.8) | (add_data[1] > 0.8)].idxmax(
@@ -264,11 +297,11 @@ def run_all():
     )  # 予測確率の高い行の疑似正解ラベルを取得する
 
     pseudo_data = pd.concat(
-        [test_x_pca.iloc[pseudo_label.index], pseudo_label], axis=1
+        [test_x.iloc[pseudo_label.index], pseudo_label], axis=1
     ).rename(columns={0: "y"})
 
     new_train_x = pd.concat(
-        [train_x_pca, pseudo_data.drop("y", axis=1)], axis=0
+        [train_x, pseudo_data.drop("y", axis=1)], axis=0
     ).reset_index(drop=True)
     new_train_y = pd.concat([train_y, pseudo_label], axis=0).reset_index(drop=True)
 
@@ -283,7 +316,7 @@ def run_all():
     threshold = 0.5
     y_preds = []
     for i, model in enumerate(models):
-        y_pred = predict(model, test_x_pca, threshold)
+        y_pred = predict(model, test_x, threshold)
         y_preds.append(y_pred)
 
     # 提出用ファイル成型

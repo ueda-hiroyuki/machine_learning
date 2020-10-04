@@ -277,23 +277,23 @@ def run_train_and_stacking(X, y, test_x):
     rf_base_models, rf_base_preds_valid = train_by_randomforest(X, y, kfold)
     nn_base_models, nn_base_preds_valid = train_by_neuralnet(X, y, kfold)
 
-    # pseudo_labeling
-    cat_new_X, cat_new_y = gen_pseudo_label(cat_base_models, X, y, test_x)
-    lgb_new_X, lgb_new_y = gen_pseudo_label(lgb_base_models, X, y, test_x, True)
-    rf_new_X, rf_new_y = gen_pseudo_label(rf_base_models, X, y, test_x)
-    nn_new_X, nn_new_y = gen_pseudo_label(nn_base_models, X, y, test_x)
+    # # pseudo_labeling
+    # cat_new_X, cat_new_y = gen_pseudo_label(cat_base_models, X, y, test_x)
+    # lgb_new_X, lgb_new_y = gen_pseudo_label(lgb_base_models, X, y, test_x, True)
+    # rf_new_X, rf_new_y = gen_pseudo_label(rf_base_models, X, y, test_x)
+    # nn_new_X, nn_new_y = gen_pseudo_label(nn_base_models, X, y, test_x)
 
-    # pseudo_labeling後の再学習
-    cat_base_models, cat_base_preds_valid = train_by_catboost(
-        cat_new_X, cat_new_y, kfold
-    )
-    lgb_base_models, lgb_base_preds_valid = train_by_lightgbm(
-        lgb_new_X, lgb_new_y, kfold
-    )
-    rf_base_models, rf_base_preds_valid = train_by_randomforest(
-        rf_new_X, rf_new_y, kfold
-    )
-    nn_base_models, nn_base_preds_valid = train_by_neuralnet(nn_new_X, nn_new_y, kfold)
+    # # pseudo_labeling後の再学習
+    # cat_base_models, cat_base_preds_valid = train_by_catboost(
+    #     cat_new_X, cat_new_y, kfold
+    # )
+    # lgb_base_models, lgb_base_preds_valid = train_by_lightgbm(
+    #     lgb_new_X, lgb_new_y, kfold
+    # )
+    # rf_base_models, rf_base_preds_valid = train_by_randomforest(
+    #     rf_new_X, rf_new_y, kfold
+    # )
+    # nn_base_models, nn_base_preds_valid = train_by_neuralnet(nn_new_X, nn_new_y, kfold)
 
     # 各アルゴルにおけるテストデータに対する予測値(metaモデルの学習データ)
     cat_base_preds_test = (
@@ -475,18 +475,11 @@ def run_all():
     X = train_data.drop(["y", "id"], axis=1)
     test_x = test_data.drop(["y", "id"], axis=1)
 
-    # meta_model = LogisticRegression(
-    #     penalty="l2",
-    #     C=0.01,
-    #     max_iter=200,
-    #     verbose=10,
-    #     n_jobs=4,
-    # )  # 最終結合用モデル
-
     # ベースモデルでの学習及び推論を行う ⇒ メタデータの学習、検証用データを出力
     meta_train_x, meta_test, meta_train_y = run_train_and_stacking(
         X, y, test_x
     )  # スタッキングの実行
+    print(meta_train_x, meta_test, meta_train_y)
 
     # metaモデルでの再学習
     n_splits = 5
@@ -496,6 +489,13 @@ def run_all():
         train_y=meta_train_y,
         kfold=kfold,
     )
+
+    new_train_x, new_train_y = gen_pseudo_label(
+        meta_models, meta_train_x, meta_train_y, meta_test
+    )
+
+    # pseudo_labeling後の再学習
+    meta_models, acc_results = train_meta(new_train_x, new_train_y, kfold)
 
     # 評価
     threshold = 0.5
