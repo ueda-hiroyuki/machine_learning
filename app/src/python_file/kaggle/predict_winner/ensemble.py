@@ -15,6 +15,8 @@ from python_file.kaggle.predict_winner.common import Common
 from sklearn.ensemble import RandomForestClassifier
 from catboost import CatBoost, Pool, CatBoostClassifier
 from sklearn.ensemble import StackingClassifier
+from sklearn.decomposition import PCA
+from umap import UMAP
 
 
 DATA_DIR = "src/sample_data/Kaggle/predict_winner"
@@ -225,6 +227,7 @@ def train_by_catboost(
             use_best_model=True,
             # one_hot_max_size=1000,
             eval_metric="Accuracy",
+            verbose=20,
         )
         model.fit(
             tr_x,
@@ -265,6 +268,26 @@ def gen_pseudo_label(models, X, y, test_x, flg=False):
     )
     new_train_y = pd.concat([y, pseudo_label], axis=0).reset_index(drop=True)
     return new_train_x, new_train_y
+
+
+def run_dimention_reduction(train_x, test_x, train_y):
+    """
+    次元削減を行う関数(PCA ⇒ UMAP)
+    """
+    # 始めにPCAで元の1/2に次元削減する
+    n_components = round(len(train_x.columns) * 0.5)
+    pca = PCA(n_components=n_components).fit(train_x)
+    reduced_train_x = pd.DataFrame(pca.transform(train_x))
+    reduced_test_x = pd.DataFrame(pca.transform(test_x))
+
+    # UMAPで2次元に削減
+    reducer = UMAP(random_state=0)
+    reducer.fit(reduced_train_x)
+    reduced_train_x = pd.DataFrame(reducer.transform(reduced_train_x))
+    reduced_test_x = pd.DataFrame(reducer.transform(reduced_test_x))
+    reduced_train_x.columns = ["umap_1", "umap_2"]
+    reduced_test_x.columns = ["umap_1", "umap_2"]
+    return reduced_train_x, reduced_test_x
 
 
 def run_train_and_stacking(X, y, test_x):
@@ -351,6 +374,7 @@ def train_meta(train_x, train_y, kfold):
             learning_rate=0.1,
             use_best_model=True,
             eval_metric="Accuracy",
+            verbose=20,
         )
         model.fit(
             tr_x,
@@ -479,7 +503,13 @@ def run_all():
     meta_train_x, meta_test, meta_train_y = run_train_and_stacking(
         X, y, test_x
     )  # スタッキングの実行
-    print(meta_train_x, meta_test, meta_train_y)
+
+    # UMAPで次元削減
+    reduced_train_x, reduced_test_x = run_dimention_reduction(
+        meta_train_x, meta_test, meta_train_y
+    )
+    meta_train_x = pd.concat([meta_train_x, reduced_train_x], axis=1)  # 次元削減した特徴量を追加
+    meta_test = pd.concat([meta_test, reduced_test_x], axis=1)  # 次元削減した特徴量を追加
 
     # metaモデルでの再学習
     n_splits = 5
@@ -509,10 +539,11 @@ def run_all():
     submission = pd.concat([ids, winner_pred], axis=1)
 
     print(submission)
+    print(meta_train_x, meta_train_y, meta_test)
     print("######################################")
     print(f"accuracy avg = {sum(acc_results) / len(acc_results)}")
     print("######################################")
-    submission.to_csv(f"{DATA_DIR}/submission44.csv", index=False)
+    submission.to_csv(f"{DATA_DIR}/submission47.csv", index=False)
 
 
 if __name__ == "__main__":

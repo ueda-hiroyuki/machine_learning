@@ -57,7 +57,7 @@ RANK_MAP = {
 cm = Common()
 
 
-def train(train_x, train_y, kfold, best_params=None):
+def train(train_x, train_y, kfold, best_params):
     categorical_columns = [x for x in train_x.columns if train_x[x].dtype == "object"]
     models = []
     acc_results = []
@@ -68,20 +68,18 @@ def train(train_x, train_y, kfold, best_params=None):
         val_y = train_y.iloc[val_idx].reset_index(drop=True)
 
         model = CatBoostClassifier(
-            iterations=1000,
+            iterations=best_params["iterations"],
             use_best_model=True,
             depth=best_params["depth"],
             learning_rate=best_params["learning_rate"],
             l2_leaf_reg=best_params["l2_leaf_reg"],
-            # one_hot_max_size=1000,
+            random_strength=best_params["random_strength"],
             eval_metric="Accuracy",
         )
         model.fit(
             tr_x,
             tr_y,
-            # cat_features=categorical_columns,
             eval_set=(val_x, val_y),
-            plot=True,
         )
 
         y_pred = model.predict(val_x)
@@ -96,32 +94,32 @@ def train(train_x, train_y, kfold, best_params=None):
     return models, acc_results
 
 
-def train_by_grid_search(train_x, train_y, kfold, best_params=None):
+def train_by_grid_search(train_x, train_y, kfold):
+    tr_x, val_x, tr_y, val_y = train_test_split(
+        train_x, train_y, test_size=0.2, random_state=1
+    )
     param_grid = {
         "depth": [4, 7, 10],
-        "learning_rate": [0.08, 0.1, 0.12],
+        "learning_rate": [0.05, 0.1, 0.15],
         "l2_leaf_reg": [1, 4, 9],
+        "random_strength": [0.5, 1, 5],
         "iterations": [1000],
     }
-    model = CatBoostClassifier(
-        eval_metric="Accuracy",
-    )
-
+    model = CatBoostClassifier()
     grid_result = GridSearchCV(
         estimator=model,
         param_grid=param_grid,
         scoring="accuracy",
         cv=kfold,
-        verbose=10,
-        return_train_score=True,
+        verbose=20,
         n_jobs=4,
     )
 
-    fit_params = {
-        "eval_set": [[train_x, train_y]],
-    }
-
-    grid_result.fit(train_x, train_y)
+    grid_result.fit(
+        tr_x,
+        tr_y,
+        eval_set=(val_x, val_y),
+    )
     return grid_result
 
 
@@ -269,23 +267,23 @@ def run_all():
     # # 学習用のハイパラをチューニング
     # best_params = get_best_params(train_x, train_y)
 
-    # 学習
-    n_splits = 5
-    kfold = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=0)
-
-    # Grid Search
+    # Grid Search(ハイパラチューニング)
+    kfold = StratifiedKFold(n_splits=3, shuffle=True, random_state=0)
     grid_result = train_by_grid_search(train_x, train_y, kfold)
     best_estimator = grid_result.best_estimator_
     best_params = grid_result.best_params_
-    pred = best_estimator.predict_proba(test_x)
+
+    # 学習
+    kfold = StratifiedKFold(n_splits=5, shuffle=True, random_state=0)
+    models, acc_results = train(train_x, train_y, kfold, best_params)
 
     # pseudo_labeling
-    pseudo_threshold = 0.8
-    add_data = pd.DataFrame(pred)
-
-    pseudo_label = add_data[
-        (add_data[0] > pseudo_threshold) | (add_data[1] > pseudo_threshold)
-    ].idxmax(
+    add_data = np.zeros((len(test_x), 2))
+    for i, model in enumerate(models):
+        y_pred = model.predict_proba(test_x)
+        add_data += y_pred
+    add_data = pd.DataFrame(add_data / len(models))
+    pseudo_label = add_data[(add_data[0] > 0.8) | (add_data[1] > 0.8)].idxmax(
         axis=1
     )  # 予測確率の高い行の疑似正解ラベルを取得する
 
@@ -317,7 +315,7 @@ def run_all():
     print(f"accuracy avg = {sum(acc_results) / len(acc_results)}")
     print(f"best params = {best_params}")
     print("######################################")
-    submission.to_csv(f"{DATA_DIR}/submission39.csv", index=False)
+    submission.to_csv(f"{DATA_DIR}/submission47.csv", index=False)
 
 
 if __name__ == "__main__":

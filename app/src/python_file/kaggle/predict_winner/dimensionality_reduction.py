@@ -71,8 +71,8 @@ def run_dimention_reduction(train_x, test_x, train_y):
     reducer.fit(reduced_train_x)
     reduced_train_x = pd.DataFrame(reducer.transform(reduced_train_x))
     reduced_test_x = pd.DataFrame(reducer.transform(reduced_test_x))
-    reduced_train_x.columns = ["umap_train_1", "umap_train_2"]
-    reduced_test_x.columns = ["umap_test_1", "umap_test_2"]
+    reduced_train_x.columns = ["umap_1", "umap_2"]
+    reduced_test_x.columns = ["umap_1", "umap_2"]
 
     # df = pd.concat([reduced_train_x, train_y], axis=1)
     # plt.figure()
@@ -99,7 +99,7 @@ def objective(X, y, trial):
         val_y = y.iloc[val_idx].reset_index(drop=True)
 
         model = CatBoostClassifier(
-            iterations=500,
+            iterations=1000,
             # iterations=1,
             learning_rate=0.1,
             use_best_model=True,
@@ -131,7 +131,7 @@ def train(train_x, train_y, kfold, best_params=None, algorithm_name=None):
 
         model = CatBoostClassifier(
             # iterations=1,
-            iterations=500,
+            iterations=1000,
             learning_rate=0.1,
             use_best_model=True,
             eval_metric="Accuracy",
@@ -267,10 +267,10 @@ def run_all():
     train_x = train_data.drop(["y", "id"], axis=1)
     test_x = test_data.drop(["y", "id"], axis=1)
 
-    # UMAPで次元削減
-    reduced_train_x, reduced_test_x = run_dimention_reduction(train_x, test_x, train_y)
-    train_x = pd.concat([train_x, reduced_train_x], axis=1)  # 次元削減した特徴量を追加
-    test_x = pd.concat([test_x, reduced_test_x], axis=1)  # 次元削減した特徴量を追加
+    # # UMAPで次元削減
+    # reduced_train_x, reduced_test_x = run_dimention_reduction(train_x, test_x, train_y)
+    # train_x = pd.concat([train_x, reduced_train_x], axis=1)  # 次元削減した特徴量を追加
+    # test_x = pd.concat([test_x, reduced_test_x], axis=1)  # 次元削減した特徴量を追加
 
     # f = partial(objective, train_x, train_y)  # 目的関数に引数を固定しておく
     # study = optuna.create_study(direction="maximize")  # Optuna で取り出す特徴量の数を最適化する
@@ -287,48 +287,47 @@ def run_all():
     kfold = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=0)
     models, acc_results = train(train_x, train_y, kfold)
 
-    add_data = np.zeros((len(test_x), 2))
-    for i, model in enumerate(models):
-        y_pred = model.predict_proba(test_x)
-        add_data += y_pred
-    add_data = pd.DataFrame(add_data / len(models))
-    pseudo_label = add_data[(add_data[0] > 0.8) | (add_data[1] > 0.8)].idxmax(
-        axis=1
-    )  # 予測確率の高い行の疑似正解ラベルを取得する
+    # add_data = np.zeros((len(test_x), 2))
+    # for i, model in enumerate(models):
+    #     y_pred = model.predict_proba(test_x)
+    #     add_data += y_pred
+    # add_data = pd.DataFrame(add_data / len(models))
+    # pseudo_label = add_data[(add_data[0] > 0.8) | (add_data[1] > 0.8)].idxmax(
+    #     axis=1
+    # )  # 予測確率の高い行の疑似正解ラベルを取得する
 
-    pseudo_data = pd.concat(
-        [test_x.iloc[pseudo_label.index], pseudo_label], axis=1
-    ).rename(columns={0: "y"})
+    # pseudo_data = pd.concat(
+    #     [test_x.iloc[pseudo_label.index], pseudo_label], axis=1
+    # ).rename(columns={0: "y"})
 
-    new_train_x = pd.concat(
-        [train_x, pseudo_data.drop("y", axis=1)], axis=0
-    ).reset_index(drop=True)
-    new_train_y = pd.concat([train_y, pseudo_label], axis=0).reset_index(drop=True)
+    # new_train_x = pd.concat(
+    #     [train_x, pseudo_data.drop("y", axis=1)], axis=0
+    # ).reset_index(drop=True)
+    # new_train_y = pd.concat([train_y, pseudo_label], axis=0).reset_index(drop=True)
 
-    # pseudo_labeling後の再学習
-    models, acc_results = train(
-        train_x=new_train_x,
-        train_y=new_train_y,
-        kfold=kfold,
-    )
+    # # pseudo_labeling後の再学習
+    # models, acc_results = train(
+    #     train_x=new_train_x,
+    #     train_y=new_train_y,
+    #     kfold=kfold,
+    # )
 
-    # 評価
-    threshold = 0.5
-    y_preds = []
-    for i, model in enumerate(models):
-        y_pred = predict(model, test_x, threshold)
-        y_preds.append(y_pred)
+    # # 評価
+    # threshold = 0.5
+    # y_preds = []
+    # for i, model in enumerate(models):
+    #     y_pred = predict(model, test_x, threshold)
+    #     y_preds.append(y_pred)
 
-    # 提出用ファイル成型
-    winner_pred = pd.concat(y_preds, axis=1).mode(axis=1).rename(columns={0: "y"})
-    submission = pd.concat([ids, winner_pred], axis=1)
+    # # 提出用ファイル成型
+    # winner_pred = pd.concat(y_preds, axis=1).mode(axis=1).rename(columns={0: "y"})
+    # submission = pd.concat([ids, winner_pred], axis=1)
 
-    print(submission)
-    print("params:", study.best_params)  # 発見したパラメータを出力する
-    print("######################################")
-    print(f"accuracy avg = {sum(acc_results) / len(acc_results)}")
-    print("######################################")
-    submission.to_csv(f"{DATA_DIR}/submission45.csv", index=False)
+    # print(submission)
+    # print("######################################")
+    # print(f"accuracy avg = {sum(acc_results) / len(acc_results)}")
+    # print("######################################")
+    # submission.to_csv(f"{DATA_DIR}/submission48.csv", index=False)
 
 
 if __name__ == "__main__":
