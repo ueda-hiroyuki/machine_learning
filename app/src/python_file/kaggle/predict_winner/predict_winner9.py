@@ -18,6 +18,7 @@ from sklearn.model_selection import (
 from sklearn.metrics import accuracy_score
 from sklearn.feature_selection import RFECV, RFE
 from python_file.kaggle.predict_winner.common import Common
+from python_file.kaggle.predict_winner.params_map import WEAPON_MAP, RANK_MAP
 
 DATA_DIR = "src/sample_data/Kaggle/predict_winner"
 TRAIN_PATH = f"{DATA_DIR}/train_data.csv"
@@ -25,39 +26,11 @@ TEST_PATH = f"{DATA_DIR}/test_data.csv"
 BUKI_PATH = f"{DATA_DIR}/weapon.csv"
 REMOVAL_COLS = ["lobby", "game-ver", "period"]
 
-WEAPON_MAP = {
-    "heroblaster_replica": "hotblaster",
-    "herobrush_replica": "hokusai",
-    "herocharger_replica": "splatcharger",
-    "heromaneuver_replica": "maneuver",
-    "heroroller_replica": "splatroller",
-    "heroshelter_replica": "parashelter",
-    "heroshooter_replica": "sshooter",
-    "heroslosher_replica": "bucketslosher",
-    "herospinner_replica": "splatspinner",
-    "octoshooter_replica": "sshooter",
-}
-
-RANK_MAP = {
-    "c-": 1,
-    "c": 2,
-    "c+": 3,
-    "b-": 4,
-    "b": 5,
-    "b+": 6,
-    "a-": 7,
-    "a": 8,
-    "a+": 9,
-    "s-": 10,
-    "s": 11,
-    "s+": 12,
-    "x": 13,
-}
 
 cm = Common()
 
 
-def train(train_x, train_y, kfold, best_params):
+def train(train_x, train_y, kfold, best_params=None):
     categorical_columns = [x for x in train_x.columns if train_x[x].dtype == "object"]
     models = []
     acc_results = []
@@ -68,25 +41,25 @@ def train(train_x, train_y, kfold, best_params):
         val_y = train_y.iloc[val_idx].reset_index(drop=True)
 
         model = CatBoostClassifier(
-            iterations=best_params["iterations"],
+            iterations=1000,
             use_best_model=True,
-            depth=best_params["depth"],
-            learning_rate=best_params["learning_rate"],
-            l2_leaf_reg=best_params["l2_leaf_reg"],
-            random_strength=best_params["random_strength"],
+            learning_rate=0.1,
             eval_metric="Accuracy",
         )
-        model.fit(
-            tr_x,
-            tr_y,
-            eval_set=(val_x, val_y),
-        )
+        model.fit(tr_x, tr_y, eval_set=(val_x, val_y))
 
-        y_pred = model.predict(val_x)
+        # model = CatBoostClassifier(
+        #     iterations=best_params["iterations"],
+        #     use_best_model=True,
+        #     depth=best_params["depth"],
+        #     learning_rate=best_params["learning_rate"],
+        #     l2_leaf_reg=best_params["l2_leaf_reg"],
+        #     random_strength=best_params["random_strength"],
+        #     eval_metric="Accuracy",
+        # )
+
+        y_pred = model2.predict(val_x)
         accuracy = accuracy_score(val_y, y_pred)
-        # # 検証結果の描画
-        # fig = lgb.plot_metric(evals_result)
-        # plt.savefig(f"{DATA_DIR}/learning_curve_{i+1}.png")
 
         models.append(model)
         acc_results.append(accuracy)
@@ -99,10 +72,10 @@ def train_by_grid_search(train_x, train_y, kfold):
         train_x, train_y, test_size=0.2, random_state=1
     )
     param_grid = {
-        "depth": [4, 7, 10],
-        "learning_rate": [0.05, 0.1, 0.15],
-        "l2_leaf_reg": [1, 4, 9],
-        "random_strength": [0.5, 1, 5],
+        "depth": [4, 5, 7],
+        "learning_rate": [0.12, 0.15, 0.17],
+        "l2_leaf_reg": [1, 2, 3],
+        "random_strength": [0.3, 0.5, 0.8],
         "iterations": [1000],
     }
     model = CatBoostClassifier()
@@ -267,15 +240,15 @@ def run_all():
     # # 学習用のハイパラをチューニング
     # best_params = get_best_params(train_x, train_y)
 
-    # Grid Search(ハイパラチューニング)
-    kfold = StratifiedKFold(n_splits=3, shuffle=True, random_state=0)
-    grid_result = train_by_grid_search(train_x, train_y, kfold)
-    best_estimator = grid_result.best_estimator_
-    best_params = grid_result.best_params_
+    # # Grid Search(ハイパラチューニング)
+    # kfold = StratifiedKFold(n_splits=3, shuffle=True, random_state=0)
+    # grid_result = train_by_grid_search(train_x, train_y, kfold)
+    # best_estimator = grid_result.best_estimator_
+    # best_params = grid_result.best_params_
 
     # 学習
     kfold = StratifiedKFold(n_splits=5, shuffle=True, random_state=0)
-    models, acc_results = train(train_x, train_y, kfold, best_params)
+    models, acc_results = train(train_x, train_y, kfold)
 
     # pseudo_labeling
     add_data = np.zeros((len(test_x), 2))
@@ -297,7 +270,7 @@ def run_all():
     new_train_y = pd.concat([train_y, pseudo_label], axis=0).reset_index(drop=True)
 
     # pseudo_labeling後の再学習
-    models, acc_results = train(new_train_x, new_train_y, kfold, best_params)
+    models, acc_results = train(new_train_x, new_train_y, kfold)
 
     # 評価
     threshold = 0.5
@@ -313,9 +286,8 @@ def run_all():
     print(submission)
     print("######################################")
     print(f"accuracy avg = {sum(acc_results) / len(acc_results)}")
-    print(f"best params = {best_params}")
     print("######################################")
-    submission.to_csv(f"{DATA_DIR}/submission47.csv", index=False)
+    submission.to_csv(f"{DATA_DIR}/submission49.csv", index=False)
 
 
 if __name__ == "__main__":
