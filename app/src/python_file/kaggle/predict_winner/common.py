@@ -3,6 +3,12 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.preprocessing import MultiLabelBinarizer
+from python_file.kaggle.predict_winner.params_map import (
+    WEAPON_MAP,
+    RANK_MAP,
+    STAGE_AREA_MAP,
+    BUKI_MAP,
+)
 
 
 WEAPONS = [
@@ -102,6 +108,25 @@ class Common:
             y = df["y"]
             return X, y
         return X
+
+    def add_buki_ability(self, df):
+        buki_map_title = [
+            "get_rank",
+            "buki_rank",
+            "range",
+            "offensive_power",
+            "hitting",
+            "DPS",
+        ]
+        weapons_a = df.loc[:, WEAPONS_A]
+        weapons_b = df.loc[:, WEAPONS_B]
+        for i in range(len(buki_map_title)):
+            buki_map = {k: v[i] for k, v in zip(BUKI_MAP.keys(), BUKI_MAP.values())}
+            for name, col in weapons_a.iteritems():
+                print(col.isna().sum())
+                weapons_a[f"{name}_{buki_map_title[i]}"] = col.replace(buki_map)
+            print("############################")
+            print(weapons_a)
 
     # 武器の勝率を計算する。
     def win_rate(self, buki_name, df):
