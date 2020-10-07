@@ -118,15 +118,22 @@ class Common:
             "hitting",
             "DPS",
         ]
-        weapons_a = df.loc[:, WEAPONS_A]
-        weapons_b = df.loc[:, WEAPONS_B]
+        # weapons_a = df.loc[:, WEAPONS_A]
+        # weapons_b = df.loc[:, WEAPONS_B]
+
+        dummy_a = df.loc[:, WEAPONS_A].fillna(df.mode().iloc[0])
+        dummy_b = df.loc[:, WEAPONS_B].fillna(df.mode().iloc[0])
+        weapons_a = pd.DataFrame()
+        weapons_b = pd.DataFrame()
+
         for i in range(len(buki_map_title)):
             buki_map = {k: v[i] for k, v in zip(BUKI_MAP.keys(), BUKI_MAP.values())}
-            for name, col in weapons_a.iteritems():
-                print(col.isna().sum())
-                weapons_a[f"{name}_{buki_map_title[i]}"] = col.replace(buki_map)
-            print("############################")
-            print(weapons_a)
+            for name_a, col_a in dummy_a.iteritems():
+                weapons_a[f"{name_a}_{buki_map_title[i]}"] = col_a.replace(buki_map)
+            for name_b, col_b in dummy_b.iteritems():
+                weapons_b[f"{name_b}_{buki_map_title[i]}"] = col_b.replace(buki_map)
+        df = pd.concat([df, weapons_a, weapons_b], axis=1)
+        return df.fillna(df.mode().iloc[0])
 
     # 武器の勝率を計算する。
     def win_rate(self, buki_name, df):
