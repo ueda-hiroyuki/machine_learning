@@ -147,7 +147,7 @@ def run_all():
     buki_raw_data = buki_raw_data.replace(WEAPON_MAP)
 
     train_raw_data["stage_area"] = train_raw_data["stage"].replace(STAGE_AREA_MAP)
-    train_raw_data = cm.add_buki_ability(train_raw_data)
+    buki_ability = cm.add_buki_ability(train_raw_data)
 
     test_raw_data["y"] = 0
     train_raw_data["usage"] = 0  # for train
@@ -213,11 +213,14 @@ def run_all():
     data = cm.add_count_range_distance(data, buki_range_distance_dict)
     data = cm.calc_weapons_win_rate_avg(data, win_rate_dict)
     data = cm.calc_weapons_win_rate_avg_per_mode(data, win_rate_mode_df)
+    data = pd.concat([data, buki_ability], axis=1)
 
     categorical_columns = [x for x in data.columns if data[x].dtype == "object"]
 
-    ce_oe = ce.OrdinalEncoder(cols=categorical_columns, handle_unknown="impute")
-    encoded_data = ce_oe.fit_transform(data)
+    ce_ohe = ce.OneHotEncoder(cols=categorical_columns, handle_unknown="impute")
+    encoded_data = ce_ohe.fit_transform(data)
+
+    encoded_data = cf.corr_column(encoded_data, 0.6)  # 相関の強い列を削除
 
     train_data = (
         encoded_data[encoded_data["usage"] == 0]
@@ -236,11 +239,11 @@ def run_all():
     train_x = train_data.drop(["y", "id"], axis=1)
     test_x = test_data.drop(["y", "id"], axis=1)
 
-    # importance結果を算出(特徴量の選択)
-    importance = get_important_features(train_x, train_y)
-    selected_feature = list(importance[importance != 0].index)
-    train_x = train_x.loc[:, selected_feature]
-    test_x = test_x.loc[:, selected_feature]
+    # # importance結果を算出(特徴量の選択)
+    # importance = get_important_features(train_x, train_y)
+    # selected_feature = list(importance[importance != 0].index)
+    # train_x = train_x.loc[:, selected_feature]
+    # test_x = test_x.loc[:, selected_feature]
 
     # # 学習用のハイパラをチューニング
     # best_params = get_best_params(train_x, train_y)
@@ -290,9 +293,10 @@ def run_all():
 
     print(submission)
     print("######################################")
+    print(f"pseudo before:{len(train_x)}, after:{len(new_train_x)}")
     print(f"accuracy avg = {sum(acc_results) / len(acc_results)}")
     print("######################################")
-    submission.to_csv(f"{DATA_DIR}/submission51.csv", index=False)
+    submission.to_csv(f"{DATA_DIR}/submission54.csv", index=False)
 
 
 if __name__ == "__main__":

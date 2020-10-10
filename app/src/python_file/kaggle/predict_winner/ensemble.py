@@ -17,7 +17,12 @@ from catboost import CatBoost, Pool, CatBoostClassifier
 from sklearn.ensemble import StackingClassifier
 from sklearn.decomposition import PCA
 from umap import UMAP
-
+from python_file.kaggle.predict_winner.params_map import (
+    WEAPON_MAP,
+    RANK_MAP,
+    STAGE_AREA_MAP,
+    BUKI_MAP,
+)
 
 DATA_DIR = "src/sample_data/Kaggle/predict_winner"
 TRAIN_PATH = f"{DATA_DIR}/train_data.csv"
@@ -25,35 +30,6 @@ TEST_PATH = f"{DATA_DIR}/test_data.csv"
 BUKI_PATH = f"{DATA_DIR}/weapon.csv"
 
 REMOVAL_COLS = ["lobby", "game-ver", "period"]
-
-WEAPON_MAP = {
-    "heroblaster_replica": "hotblaster",
-    "herobrush_replica": "hokusai",
-    "herocharger_replica": "splatcharger",
-    "heromaneuver_replica": "maneuver",
-    "heroroller_replica": "splatroller",
-    "heroshelter_replica": "parashelter",
-    "heroshooter_replica": "sshooter",
-    "heroslosher_replica": "bucketslosher",
-    "herospinner_replica": "splatspinner",
-    "octoshooter_replica": "sshooter",
-}
-
-RANK_MAP = {
-    "c-": 1,
-    "c": 2,
-    "c+": 3,
-    "b-": 4,
-    "b": 5,
-    "b+": 6,
-    "a-": 7,
-    "a": 8,
-    "a+": 9,
-    "s-": 10,
-    "s": 11,
-    "s+": 12,
-    "x": 13,
-}
 
 cm = Common()
 
@@ -101,8 +77,8 @@ def train_by_randomforest(
             max_features="auto",
             min_impurity_split=1e-07,
             min_samples_leaf=10,
-            n_estimators=200,
-            # n_estimators=1,
+            # n_estimators=200,
+            n_estimators=1,
             n_jobs=4,
             verbose=10,
         )
@@ -130,8 +106,8 @@ def train_by_neuralnet(
         early_stopping=True,
         hidden_layer_sizes=(100, 100, 100, 100, 100),
         learning_rate_init=0.1,
-        # max_iter=1,
-        max_iter=200,
+        max_iter=1,
+        # max_iter=200,
         momentum=0.9,
         n_iter_no_change=10,
         random_state=1,
@@ -189,8 +165,8 @@ def train_by_lightgbm(
             train_set=tr_set,
             valid_sets=[val_set, tr_set],
             valid_names=["eval", "train"],
-            # num_boost_round=1,
-            num_boost_round=1000,
+            num_boost_round=1,
+            # num_boost_round=1000,
             early_stopping_rounds=100,
             verbose_eval=1,
             evals_result=evals_result,
@@ -221,8 +197,8 @@ def train_by_catboost(
         val_y = train_y.iloc[val_idx]
 
         model = CatBoostClassifier(
-            iterations=1000,
-            # iterations=1,
+            # iterations=1000,
+            iterations=1,
             learning_rate=0.1,
             use_best_model=True,
             # one_hot_max_size=1000,
@@ -285,6 +261,11 @@ def run_dimention_reduction(train_x, test_x, train_y):
     reducer.fit(reduced_train_x)
     reduced_train_x = pd.DataFrame(reducer.transform(reduced_train_x))
     reduced_test_x = pd.DataFrame(reducer.transform(reduced_test_x))
+
+    # 標準化
+    reduced_train_x = cf.standardize(reduced_train_x)
+    reduced_test_x = cf.standardize(reduced_test_x)
+
     reduced_train_x.columns = ["umap_1", "umap_2"]
     reduced_test_x.columns = ["umap_1", "umap_2"]
     return reduced_train_x, reduced_test_x
@@ -368,24 +349,50 @@ def train_meta(train_x, train_y, kfold):
         val_x = train_x.iloc[val_idx].reset_index(drop=True)
         val_y = train_y.iloc[val_idx].reset_index(drop=True)
 
-        model = CatBoostClassifier(
-            iterations=1000,
-            # iterations=1,
-            learning_rate=0.1,
-            use_best_model=True,
-            eval_metric="Accuracy",
-            verbose=20,
-        )
-        model.fit(
-            tr_x,
-            tr_y,
-            eval_set=(val_x, val_y),
-        )
-        y_pred = model.predict(val_x)
+        model = LogisticRegression(
+            penalty="l2",
+            C=1,
+            solver="lbfgs",
+            max_iter=100,
+            multi_class="auto",
+            verbose=10,
+            n_jobs=4,
+        )  # ロジスティック回帰モデルのインスタンスを作成
+        model.fit(meta_train_x, meta_test)
+        y_pred = model.predict_proba(val_x)
         accuracy = accuracy_score(val_y, y_pred)
         models.append(model)
         acc_results.append(accuracy)
     return models, acc_results
+
+
+# def train_meta(train_x, train_y, kfold):
+#     models = []
+#     acc_results = []
+#     for i, (tr_idx, val_idx) in enumerate(kfold.split(train_x, train_y)):
+#         tr_x = train_x.iloc[tr_idx].reset_index(drop=True)
+#         tr_y = train_y.iloc[tr_idx].reset_index(drop=True)
+#         val_x = train_x.iloc[val_idx].reset_index(drop=True)
+#         val_y = train_y.iloc[val_idx].reset_index(drop=True)
+
+#         model = CatBoostClassifier(
+#             # iterations=1000,
+#             iterations=1,
+#             learning_rate=0.1,
+#             use_best_model=True,
+#             eval_metric="Accuracy",
+#             verbose=20,
+#         )
+#         model.fit(
+#             tr_x,
+#             tr_y,
+#             eval_set=(val_x, val_y),
+#         )
+#         y_pred = model.predict(val_x)
+#         accuracy = accuracy_score(val_y, y_pred)
+#         models.append(model)
+#         acc_results.append(accuracy)
+#     return models, acc_results
 
 
 def _predict(models, test_x):
@@ -411,6 +418,9 @@ def run_all():
     train_raw_data = train_raw_data.replace(WEAPON_MAP)
     test_raw_data = test_raw_data.replace(WEAPON_MAP)
     buki_raw_data = buki_raw_data.replace(WEAPON_MAP)
+
+    train_raw_data["stage_area"] = train_raw_data["stage"].replace(STAGE_AREA_MAP)
+    buki_ability = cm.add_buki_ability(train_raw_data)
 
     test_raw_data["y"] = 0
     train_raw_data["usage"] = 0  # for train
@@ -476,11 +486,13 @@ def run_all():
     data = cm.add_count_range_distance(data, buki_range_distance_dict)
     data = cm.calc_weapons_win_rate_avg(data, win_rate_dict)
     data = cm.calc_weapons_win_rate_avg_per_mode(data, win_rate_mode_df)
+    data = pd.concat([data, buki_ability], axis=1)
 
     categorical_columns = [x for x in data.columns if data[x].dtype == "object"]
 
     ce_oe = ce.OneHotEncoder(cols=categorical_columns, handle_unknown="impute")
     encoded_data = ce_oe.fit_transform(data)
+    encoded_data = cf.corr_column(encoded_data, 0.7)  # 相関の強い列を削除
 
     train_data = (
         encoded_data[encoded_data["usage"] == 0]
@@ -519,12 +531,10 @@ def run_all():
         train_y=meta_train_y,
         kfold=kfold,
     )
-
+    # pseudo_labeling後の再学習
     new_train_x, new_train_y = gen_pseudo_label(
         meta_models, meta_train_x, meta_train_y, meta_test
     )
-
-    # pseudo_labeling後の再学習
     meta_models, acc_results = train_meta(new_train_x, new_train_y, kfold)
 
     # 評価
@@ -541,9 +551,10 @@ def run_all():
     print(submission)
     print(meta_train_x, meta_train_y, meta_test)
     print("######################################")
+    print(f"pseudo before:{len(train_x)}, after:{len(new_train_x)}")
     print(f"accuracy avg = {sum(acc_results) / len(acc_results)}")
     print("######################################")
-    submission.to_csv(f"{DATA_DIR}/submission47.csv", index=False)
+    submission.to_csv(f"{DATA_DIR}/submission55.csv", index=False)
 
 
 if __name__ == "__main__":

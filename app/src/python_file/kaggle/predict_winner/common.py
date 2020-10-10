@@ -118,8 +118,6 @@ class Common:
             "hitting",
             "DPS",
         ]
-        # weapons_a = df.loc[:, WEAPONS_A]
-        # weapons_b = df.loc[:, WEAPONS_B]
 
         dummy_a = df.loc[:, WEAPONS_A].fillna(df.mode().iloc[0])
         dummy_b = df.loc[:, WEAPONS_B].fillna(df.mode().iloc[0])
@@ -132,7 +130,7 @@ class Common:
                 weapons_a[f"{name_a}_{buki_map_title[i]}"] = col_a.replace(buki_map)
             for name_b, col_b in dummy_b.iteritems():
                 weapons_b[f"{name_b}_{buki_map_title[i]}"] = col_b.replace(buki_map)
-        df = pd.concat([df, weapons_a, weapons_b], axis=1)
+        df = pd.concat([weapons_a, weapons_b], axis=1)
         return df.fillna(df.mode().iloc[0])
 
     # 武器の勝率を計算する。
@@ -165,7 +163,6 @@ class Common:
                 df[f"{col}_win_rate"] = df[col].map(win_rate_dict)  # 各武器の勝率を新特徴量として追加
         df["team_A_win_rate_avg"] = df.loc[:, weapons_rate_A].mean(axis="columns")
         df["team_B_win_rate_avg"] = df.loc[:, weapons_rate_B].mean(axis="columns")
-        # return df
         return df.drop([*weapons_rate_A, *weapons_rate_B], axis=1)  # 平均値のみ特徴量として加える。
 
     def calc_weapons_win_rate_avg_per_mode(self, df, win_rate_mode_df):
@@ -211,12 +208,18 @@ class Common:
         count_buki_rangeB["count_team_B"] = weapons_of_teamB
         return pd.concat([df, count_buki_rangeA, count_buki_rangeB], axis=1)
 
-    # 各チームのレベル平均を算出する。
+    # 各チームのレベル平均,最大値と最小値の差を算出する。
     def calc_team_level_avg(self, df):
         A_level_list = ["A1-level", "A2-level", "A3-level", "A4-level"]
         B_level_list = ["B1-level", "B2-level", "B3-level", "B4-level"]
         df["teamA_level_avg"] = df.loc[:, A_level_list].mean(axis=1)
         df["teamB_level_avg"] = df.loc[:, B_level_list].mean(axis=1)
+        df["teamA_lebel_diff"] = df.loc[:, A_level_list].max(axis="columns") - df.loc[
+            :, A_level_list
+        ].min(axis="columns")
+        df["teamB_lebel_diff"] = df.loc[:, B_level_list].max(axis="columns") - df.loc[
+            :, B_level_list
+        ].min(axis="columns")
         return df
 
     # 各チームのランク平均を算出する。
