@@ -147,7 +147,11 @@ def run_all():
     buki_raw_data = buki_raw_data.replace(WEAPON_MAP)
 
     train_raw_data["stage_area"] = train_raw_data["stage"].replace(STAGE_AREA_MAP)
-    buki_ability = cm.add_buki_ability(train_raw_data)
+    train_buki_ability = cm.add_buki_ability(train_raw_data)
+    test_buki_ability = cm.add_buki_ability(test_raw_data)
+    buki_ability = pd.concat(
+        [train_buki_ability, test_buki_ability], axis=0
+    ).reset_index(drop=True)
 
     test_raw_data["y"] = 0
     train_raw_data["usage"] = 0  # for train
@@ -264,7 +268,7 @@ def run_all():
         y_pred = model.predict_proba(test_x)
         add_data += y_pred
     add_data = pd.DataFrame(add_data / len(models))
-    pseudo_label = add_data[(add_data[0] > 0.8) | (add_data[1] > 0.8)].idxmax(
+    pseudo_label = add_data[(add_data[0] > 0.7) | (add_data[1] > 0.7)].idxmax(
         axis=1
     )  # 予測確率の高い行の疑似正解ラベルを取得する
 

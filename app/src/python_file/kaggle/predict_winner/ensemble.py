@@ -419,8 +419,11 @@ def run_all():
     test_raw_data = test_raw_data.replace(WEAPON_MAP)
     buki_raw_data = buki_raw_data.replace(WEAPON_MAP)
 
-    train_raw_data["stage_area"] = train_raw_data["stage"].replace(STAGE_AREA_MAP)
-    buki_ability = cm.add_buki_ability(train_raw_data)
+    train_buki_ability = cm.add_buki_ability(train_raw_data)
+    test_buki_ability = cm.add_buki_ability(test_raw_data)
+    buki_ability = pd.concat(
+        [train_buki_ability, test_buki_ability], axis=0
+    ).reset_index(drop=True)
 
     test_raw_data["y"] = 0
     train_raw_data["usage"] = 0  # for train
