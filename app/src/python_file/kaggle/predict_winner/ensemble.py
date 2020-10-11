@@ -77,8 +77,8 @@ def train_by_randomforest(
             max_features="auto",
             min_impurity_split=1e-07,
             min_samples_leaf=10,
-            # n_estimators=200,
-            n_estimators=1,
+            n_estimators=200,
+            # n_estimators=1,
             n_jobs=4,
             verbose=10,
         )
@@ -106,8 +106,8 @@ def train_by_neuralnet(
         early_stopping=True,
         hidden_layer_sizes=(100, 100, 100, 100, 100),
         learning_rate_init=0.1,
-        max_iter=1,
-        # max_iter=200,
+        # max_iter=1,
+        max_iter=200,
         momentum=0.9,
         n_iter_no_change=10,
         random_state=1,
@@ -165,8 +165,8 @@ def train_by_lightgbm(
             train_set=tr_set,
             valid_sets=[val_set, tr_set],
             valid_names=["eval", "train"],
-            num_boost_round=1,
-            # num_boost_round=1000,
+            # num_boost_round=1,
+            num_boost_round=1000,
             early_stopping_rounds=100,
             verbose_eval=1,
             evals_result=evals_result,
@@ -197,8 +197,8 @@ def train_by_catboost(
         val_y = train_y.iloc[val_idx]
 
         model = CatBoostClassifier(
-            # iterations=1000,
-            iterations=1,
+            iterations=1000,
+            # iterations=1,
             learning_rate=0.1,
             use_best_model=True,
             # one_hot_max_size=1000,
@@ -231,7 +231,7 @@ def gen_pseudo_label(models, X, y, test_x, flg=False):
             y_pred = model.predict_proba(test_x)
         add_data += y_pred
     add_data = pd.DataFrame(add_data / len(models))
-    pseudo_label = add_data[(add_data[0] > 0.8) | (add_data[1] > 0.8)].idxmax(
+    pseudo_label = add_data[(add_data[0] > 0.7) | (add_data[1] > 0.7)].idxmax(
         axis=1
     )  # 予測確率の高い行の疑似正解ラベルを取得する
 
@@ -340,32 +340,6 @@ def run_train_and_stacking(X, y, test_x):
     return meta_train, meta_test, y
 
 
-def train_meta(train_x, train_y, kfold):
-    models = []
-    acc_results = []
-    for i, (tr_idx, val_idx) in enumerate(kfold.split(train_x, train_y)):
-        tr_x = train_x.iloc[tr_idx].reset_index(drop=True)
-        tr_y = train_y.iloc[tr_idx].reset_index(drop=True)
-        val_x = train_x.iloc[val_idx].reset_index(drop=True)
-        val_y = train_y.iloc[val_idx].reset_index(drop=True)
-
-        model = LogisticRegression(
-            penalty="l2",
-            C=1,
-            solver="lbfgs",
-            max_iter=100,
-            multi_class="auto",
-            verbose=10,
-            n_jobs=4,
-        )  # ロジスティック回帰モデルのインスタンスを作成
-        model.fit(meta_train_x, meta_test)
-        y_pred = model.predict_proba(val_x)
-        accuracy = accuracy_score(val_y, y_pred)
-        models.append(model)
-        acc_results.append(accuracy)
-    return models, acc_results
-
-
 # def train_meta(train_x, train_y, kfold):
 #     models = []
 #     acc_results = []
@@ -375,24 +349,50 @@ def train_meta(train_x, train_y, kfold):
 #         val_x = train_x.iloc[val_idx].reset_index(drop=True)
 #         val_y = train_y.iloc[val_idx].reset_index(drop=True)
 
-#         model = CatBoostClassifier(
-#             # iterations=1000,
-#             iterations=1,
-#             learning_rate=0.1,
-#             use_best_model=True,
-#             eval_metric="Accuracy",
-#             verbose=20,
-#         )
-#         model.fit(
-#             tr_x,
-#             tr_y,
-#             eval_set=(val_x, val_y),
-#         )
+#         model = LogisticRegression(
+#             penalty="l2",
+#             C=1,
+#             solver="lbfgs",
+#             max_iter=100,
+#             multi_class="auto",
+#             verbose=10,
+#             n_jobs=4,
+#         )  # ロジスティック回帰モデルのインスタンスを作成
+#         model.fit(tr_x, tr_y)
 #         y_pred = model.predict(val_x)
 #         accuracy = accuracy_score(val_y, y_pred)
 #         models.append(model)
 #         acc_results.append(accuracy)
 #     return models, acc_results
+
+
+def train_meta(train_x, train_y, kfold):
+    models = []
+    acc_results = []
+    for i, (tr_idx, val_idx) in enumerate(kfold.split(train_x, train_y)):
+        tr_x = train_x.iloc[tr_idx].reset_index(drop=True)
+        tr_y = train_y.iloc[tr_idx].reset_index(drop=True)
+        val_x = train_x.iloc[val_idx].reset_index(drop=True)
+        val_y = train_y.iloc[val_idx].reset_index(drop=True)
+
+        model = CatBoostClassifier(
+            iterations=1000,
+            # iterations=1,
+            learning_rate=0.1,
+            use_best_model=True,
+            eval_metric="Accuracy",
+            verbose=20,
+        )
+        model.fit(
+            tr_x,
+            tr_y,
+            eval_set=(val_x, val_y),
+        )
+        y_pred = model.predict(val_x)
+        accuracy = accuracy_score(val_y, y_pred)
+        models.append(model)
+        acc_results.append(accuracy)
+    return models, acc_results
 
 
 def _predict(models, test_x):
@@ -519,12 +519,12 @@ def run_all():
         X, y, test_x
     )  # スタッキングの実行
 
-    # UMAPで次元削減
-    reduced_train_x, reduced_test_x = run_dimention_reduction(
-        meta_train_x, meta_test, meta_train_y
-    )
-    meta_train_x = pd.concat([meta_train_x, reduced_train_x], axis=1)  # 次元削減した特徴量を追加
-    meta_test = pd.concat([meta_test, reduced_test_x], axis=1)  # 次元削減した特徴量を追加
+    # # UMAPで次元削減
+    # reduced_train_x, reduced_test_x = run_dimention_reduction(
+    #     meta_train_x, meta_test, meta_train_y
+    # )
+    # meta_train_x = pd.concat([meta_train_x, reduced_train_x], axis=1)  # 次元削減した特徴量を追加
+    # meta_test = pd.concat([meta_test, reduced_test_x], axis=1)  # 次元削減した特徴量を追加
 
     # metaモデルでの再学習
     n_splits = 5
@@ -554,10 +554,10 @@ def run_all():
     print(submission)
     print(meta_train_x, meta_train_y, meta_test)
     print("######################################")
-    print(f"pseudo before:{len(train_x)}, after:{len(new_train_x)}")
+    print(f"pseudo before:{len(meta_train_x)}, after:{len(new_train_x)}")
     print(f"accuracy avg = {sum(acc_results) / len(acc_results)}")
     print("######################################")
-    submission.to_csv(f"{DATA_DIR}/submission55.csv", index=False)
+    submission.to_csv(f"{DATA_DIR}/submission56.csv", index=False)
 
 
 if __name__ == "__main__":

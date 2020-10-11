@@ -5,7 +5,7 @@ import numpy as np
 DATA_DIR = "src/sample_data/Kaggle/predict_moa"
 
 
-def main():
+def run_all():
     train_raw = pd.read_csv(f"{DATA_DIR}/train_features.csv")
     test_raw = pd.read_csv(f"{DATA_DIR}/test_features.csv")
     train_target_nonscored_raw = pd.read_csv(f"{DATA_DIR}/train_targets_nonscored.csv")
@@ -15,4 +15,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    run_all()
