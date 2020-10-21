@@ -1,3 +1,5 @@
+import itertools
+import random
 import pandas as pd
 import numpy as np
 import lightgbm as lgb
@@ -72,33 +74,52 @@ def train(train_x, train_y, kfold, best_params=None):
     return models, acc_results
 
 
-def train_by_grid_search(train_x, train_y, kfold):
-    tr_x, val_x, tr_y, val_y = train_test_split(
-        train_x, train_y, test_size=0.2, random_state=1
-    )
-    param_grid = {
-        "depth": [4, 5, 7],
-        "learning_rate": [0.12, 0.15, 0.17],
-        "l2_leaf_reg": [1, 2, 3],
-        "random_strength": [0.3, 0.5, 0.8],
-        "iterations": [1000],
-    }
-    model = CatBoostClassifier()
-    grid_result = GridSearchCV(
-        estimator=model,
-        param_grid=param_grid,
-        scoring="accuracy",
-        cv=kfold,
-        verbose=20,
-        n_jobs=4,
-    )
+def expand_dataset(N: int, df: pd.DataFrame, random_state=42):
+    """データを拡張する"""
 
-    grid_result.fit(
-        tr_x,
-        tr_y,
-        eval_set=(val_x, val_y),
+    if N == 0:
+        return df
+
+    # 実際には列名のリストが格納されている
+    a1 = ["A1-weapon", "A1-rank", "A1-level"]
+    a2 = ["A2-weapon", "A2-rank", "A2-level"]
+    a3 = ["A3-weapon", "A3-rank", "A3-level"]
+    a4 = ["A4-weapon", "A4-rank", "A4-level"]
+    b1 = ["B1-weapon", "B1-rank", "B1-level"]
+    b2 = ["B2-weapon", "B2-rank", "B2-level"]
+    b3 = ["B3-weapon", "B3-rank", "B3-level"]
+    b4 = ["B4-weapon", "B4-rank", "B4-level"]
+
+    train = df.copy(deep=True)
+    train_temp = df.copy(deep=True)
+    all_train = df.copy(deep=True)
+
+    a_team_list = [a1, a2, a3, a4]
+    b_team_list = [b1, b2, b3, b4]
+
+    a_team_combination = list(itertools.permutations(a_team_list))
+    b_team_combination = list(itertools.permutations(b_team_list))
+
+    a_and_b_combination = list(
+        itertools.product(a_team_combination, b_team_combination)
     )
-    return grid_result
+    if N > len(a_and_b_combination):
+        pattern_list = a_and_b_combination
+    else:
+        random.seed(random_state)
+        pattern_list = random.sample(a_and_b_combination, N)
+    for pattern in pattern_list:
+        train[pattern[0][0]] = train_temp[a1]
+        train[pattern[0][1]] = train_temp[a2]
+        train[pattern[0][2]] = train_temp[a3]
+        train[pattern[0][3]] = train_temp[a4]
+        train[pattern[1][0]] = train_temp[b1]
+        train[pattern[1][1]] = train_temp[b2]
+        train[pattern[1][2]] = train_temp[b3]
+        train[pattern[1][3]] = train_temp[b4]
+
+        all_train = pd.concat([all_train, train], axis=0)
+    return all_train
 
 
 def get_important_features(train_x, train_y):
@@ -147,18 +168,23 @@ def run_all():
     buki_raw_data = buki_raw_data.replace(WEAPON_MAP)
 
     train_raw_data["stage_area"] = train_raw_data["stage"].replace(STAGE_AREA_MAP)
+    test_raw_data["stage_area"] = test_raw_data["stage"].replace(STAGE_AREA_MAP)
     train_buki_ability = cm.add_buki_ability(train_raw_data)
     test_buki_ability = cm.add_buki_ability(test_raw_data)
     buki_ability = pd.concat(
         [train_buki_ability, test_buki_ability], axis=0
     ).reset_index(drop=True)
 
+    train_raw_data = expand_dataset(20, train_raw_data).reset_index(drop=True)
+
     test_raw_data["y"] = 0
     train_raw_data["usage"] = 0  # for train
     test_raw_data["usage"] = 1  # for test
 
-    X = cm.make_input_output(train_raw_data, with_y=False)
-    train_data = pd.concat([train_raw_data, X], axis=1)
+    # X = cm.make_input_output(train_raw_data, with_y=False)
+    # train_data = pd.concat([train_raw_data, X], axis=1)
+
+    train_data = train_raw_data
 
     # 武器ごとの勝率計算
     win_rate_df = []
@@ -243,21 +269,6 @@ def run_all():
     train_x = train_data.drop(["y", "id"], axis=1)
     test_x = test_data.drop(["y", "id"], axis=1)
 
-    # # importance結果を算出(特徴量の選択)
-    # importance = get_important_features(train_x, train_y)
-    # selected_feature = list(importance[importance != 0].index)
-    # train_x = train_x.loc[:, selected_feature]
-    # test_x = test_x.loc[:, selected_feature]
-
-    # # 学習用のハイパラをチューニング
-    # best_params = get_best_params(train_x, train_y)
-
-    # # Grid Search(ハイパラチューニング)
-    # kfold = StratifiedKFold(n_splits=3, shuffle=True, random_state=0)
-    # grid_result = train_by_grid_search(train_x, train_y, kfold)
-    # best_estimator = grid_result.best_estimator_
-    # best_params = grid_result.best_params_
-
     # 学習
     kfold = StratifiedKFold(n_splits=5, shuffle=True, random_state=0)
     models, acc_results = train(train_x, train_y, kfold)
@@ -300,7 +311,7 @@ def run_all():
     print(f"pseudo before:{len(train_x)}, after:{len(new_train_x)}")
     print(f"accuracy avg = {sum(acc_results) / len(acc_results)}")
     print("######################################")
-    submission.to_csv(f"{DATA_DIR}/submission54.csv", index=False)
+    submission.to_csv(f"{DATA_DIR}/submission60.csv", index=False)
 
 
 if __name__ == "__main__":
