@@ -112,7 +112,9 @@ def null_importance():
     # 閾値を超える特徴量を取得
     imp_features = []
     for num, feature in enumerate(actual_imp_df["feature"]):
-        display_distributions(actual_imp_df, null_imp_df, feature, num)
+        display_distributions(
+            actual_imp_df, null_imp_df, feature, num
+        )  # null importance ヒストグラム作成
         actual_value = actual_imp_df.query(f"feature=='{feature}'")["importance"].values
         null_value = null_imp_df.query(f"feature=='{feature}'")["importance"].values
         percentage = (null_value < actual_value).sum() / null_value.size * 100
