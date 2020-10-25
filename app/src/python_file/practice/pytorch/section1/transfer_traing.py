@@ -174,6 +174,9 @@ def train_model(net, data_loaders_dict, criterion, optimizer, num_epoch):
                     # イテレーション結果の計算
                     epoch_loss += loss.item() * inputs.size(0)  # lossの合計を更新
                     epoch_corrects += torch.sum(preds == labels.data)  # 正解数の合計を更新
+                    print(f"loss: {loss.item()}")
+                    print(f"size: {inputs.size()}")
+                    print(f"shape: {inputs.shape}")
 
             # epochごとのlossと正解率を表示
             epoch_loss = epoch_loss / len(data_loaders_dict[phase].dataset)
