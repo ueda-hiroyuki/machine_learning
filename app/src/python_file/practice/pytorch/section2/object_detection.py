@@ -1,13 +1,17 @@
 import os.path as osp
 import torch
+import cv2
 import torchvision
 import torch.nn as nn
 import torch.optim as optim
 import numpy as np
 import xml.etree.ElementTree as ET
+import matplotlib.pyplot as plt
 from PIL import Image
 from torchvision import models, transforms
 from torch.utils.data import Dataset, DataLoader
+from data_augumentation import *
+from anno_xml2list import *
 
 
 HOME_DIR = "src/sample_data/pytorch_advanced/2_objectdetection"
@@ -28,52 +32,88 @@ voc2012_classes = [
     "train",
     "bottle",
     "chair",
-    "dining" "table",
-    "potted" "plant",
+    "diningtable",
+    "pottedplant",
     "sofa",
     "tvmonitor",
 ]
 
 
-class Anno_xml2list:
+class DataTransform:
     """
-    1枚の画像データに対するxml形式のアノテーションファイルを、
-    画像サイズで規格化してからリスト形式に変換する
-    ・input：出力クラスのリスト
+    画像とアノテーションの前処理を行うクラス(学習時と推論時は異なる挙動)
+    学習時はData Augumentationを行う。
+    ・input：
+    　　　input_size：入力の画像サイズ
+    　　　color_mean：画像の色の標準化を行う。
+
     """
 
-    def __init__(self, classes):
-        self.classes = classes
+    def __init__(self, input_size, color_mean):
+        self.data_transform = {
+            "train": Compose(
+                [
+                    ConvertFromInts(),  # int型をfloat型に変換
+                    ToAbsoluteCoords(),  # アノテーションデータの規格化を戻す
+                    PhotometricDistort(),  # 画像の色彩をランダムに変化させる
+                    Expand(color_mean),  # 画像のキャンバスを広げる
+                    RandomSampleCrop(),  # 画像内の一部をランダムに抜き出す
+                    RandomMirror(),  # ランダムに画像を反転させる
+                    ToPercentCoords(),  # アノテーションデータを規格化
+                    Resize(input_size),  # 画像サイズを(input_size * input_size)に変更
+                    SubtractMeans(color_mean),  # BGRの色の平均値を引き算
+                ]
+            ),
+            "valid": Compose(
+                [
+                    ConvertFromInts(),
+                    Resize(input_size),
+                    SubtractMeans(color_mean),
+                ]
+            ),
+        }
 
-    def __call__(self, xml_path, height, width):
-        # 1枚の画像内のアノテーション情報を返す([[xmin, ymin, xmax, ymax, class_idx], ...])。
-        ret = []
-        root = ET.parse(xml_path).getroot()
-        pts = ["xmin", "ymin", "xmax", "ymax"]
-        for obj in root.iter("object"):  # 画像内のアノテーションの個数分だけ回す
+    def __call__(self, img, phase, boxes, labels):
+        return self.data_transform[phase](img, boxes, labels)
 
-            # difficultが"1"のものは画像では判断つかないもの
-            difficult = obj.find("difficult").text
-            if difficult == "1":
-                continue
 
-            label = obj.find("name").text
-            xmlbox = obj.find("bndbox")  # element型
-            bboxes = []
-            for pt in pts:
-                pixel = int(xmlbox.find(pt).text) - 1  # VOCは左上の原点が(1,1)であるため(0,0)に変更
-                # バウンディングボックスの座標の規格化(入力画像のサイズに依存しないようにするため)
-                if (pt == "xmin") or (pt == "xmin"):
-                    pixel /= width
-                else:
-                    pixel /= height  # "ymin","ymax"の時は高さで規格化する
-                bboxes.append(pixel)
-            label_idx = self.classes.index(label)
-            bboxes.append(label_idx)
+class VOCDataset(Dataset):
+    def __init__(self, img_list, anno_list, phase, transform, transform_anno):
+        self.img_list = img_list  # 学習用画像データのパスのリスト
+        self.anno_list = anno_list  # アノテーション情報のパスのリスト
+        self.phase = phase
+        self.transform = transform  # 前処理クラスのインスタンス
+        self.transform_anno = transform_anno  # アノテーションの前処理クラスのインスタンス
 
-            ret.append(bboxes)
-        print(ret)
-        return ret
+    def __len__(
+        self,
+    ):
+        # 画像の枚数を返す
+        return len(self.img_list)
+
+    def __getitem__(self, index):
+        # 前処理をした画像データ(tensor型)とアノテーションを取得
+        img, gt, _, _ = self.pull_item(index)
+        return img, gt
+
+    def pull_item(self, index):
+        # 前処理をした画像データ(tensor型)とアノテーション、画像の高さと幅を取得
+        image_file_path = self.img_list[index]
+        img = cv2.imread(image_file_path)
+        height, width, channel = img.shape
+
+        # アノテーション情報をリストにする
+        anno_list = self.transform_anno(self.anno_list[index], height, width)
+
+        # 前処理を実施
+        img, boxes, labels = self.transform(
+            img, self.phase, anno_list[:, :4], anno_list[:, 4]
+        )
+        # 色チャネルをBGR⇒RGBに変更、そして(高さ、幅、チャネル数)⇒(チャネル数、高さ、幅)に変更
+        img = torch.from_numpy(img[:, :, (2, 0, 1)]).permute(2, 0, 1)
+        # アノテーションのpixel情報とラベルをくっつける
+        gt = np.hstack((boxes, np.expand_dims(labels, axis=1)))
+        return img, gt, height, width
 
 
 def make_data_path_list(root_dir):
@@ -115,6 +155,23 @@ def make_data_path_list(root_dir):
     )
 
 
+def od_collate_fn(batch):
+    """
+    datasetから取り出すアノテーションのサイズが画像により異なる。
+    バッチにするときどの画像がどの矩形かを結びつける必要があり、idxを付ける必要がある。
+    この変化に対応可能なDataloaderを作成する
+    """
+    targets = []
+    imgs = []
+    for sample in batch:
+        imgs.append(sample[0])  # sample[0]はimg
+        targets.append(torch.FloatTensor(sample[1]))  # sample[1]はannotation
+    imgs = torch.stack(
+        imgs, dim=0
+    )  # [torch(3,300,300), torch(3,300,300), torch(3,300,300)] ⇒ torch(3, 3,300,300)
+    return imgs, targets
+
+
 def main_run():
     (
         train_img_path_list,
@@ -122,8 +179,37 @@ def main_run():
         train_anno_path_list,
         valid_anno_path_list,
     ) = make_data_path_list(f"{HOME_DIR}/data/VOC2012")
-    an = Anno_xml2list(voc2012_classes)
-    anno_list = an(train_anno_path_list[0], 100, 100)
+
+    color_mean = (104, 117, 123)
+    input_size = 300
+    batch_size = 3
+    transform = DataTransform(input_size, color_mean)
+    transform_anno = Anno_xml2list(voc2012_classes)
+
+    # datasetの作成
+    train_dataset = VOCDataset(
+        train_img_path_list, train_anno_path_list, "train", transform, transform_anno
+    )
+    valid_dataset = VOCDataset(
+        valid_img_path_list, valid_anno_path_list, "valid", transform, transform_anno
+    )
+
+    # Dataloaderを作成
+    train_dataloader = DataLoader(
+        train_dataset, batch_size=batch_size, shuffle=True, collate_fn=od_collate_fn
+    )
+    valid_dataloader = DataLoader(
+        valid_dataset, batch_size=batch_size, shuffle=False, collate_fn=od_collate_fn
+    )
+    # 辞書型にまとめる
+    dataloaders_dict = {
+        "train": train_dataloader,
+        "valid": valid_dataloader,
+    }
+
+    batch_iter = iter(dataloaders_dict["train"])
+    images, targets = next(batch_iter)
+    print(images.shape, targets)
 
 
 if __name__ == "__main__":
