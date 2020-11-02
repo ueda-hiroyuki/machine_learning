@@ -12,6 +12,7 @@ from torchvision import models, transforms
 from torch.utils.data import Dataset, DataLoader
 from data_augumentation import *
 from anno_xml2list import *
+from modules import *
 
 
 HOME_DIR = "src/sample_data/pytorch_advanced/2_objectdetection"
@@ -173,6 +174,9 @@ def od_collate_fn(batch):
 
 
 def main_run():
+    """
+    SSDは１度のCNN演算で物体の「領域候補検出」と「クラス分類」の両方を行うことができる
+    """
     (
         train_img_path_list,
         valid_img_path_list,
@@ -209,7 +213,11 @@ def main_run():
 
     batch_iter = iter(dataloaders_dict["train"])
     images, targets = next(batch_iter)
-    print(images.shape, targets)
+
+    vgg = generate_vgg()
+    extra = generate_extra()
+    loc, conf = generate_loc_and_conf()
+    print(loc, conf)
 
 
 if __name__ == "__main__":
