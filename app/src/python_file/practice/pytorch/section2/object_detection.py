@@ -192,7 +192,7 @@ def decode(loc, dbox_list):
     ・input
     　　⇒ loc: SSDモデルで推論するオフセット情報(tensor([8732,4])) ⇒ [Δcx, Δct, Δwidth, Δheight]
     　　⇒ dbox_list: デフォルトボックスの情報(tensor([8732,4])) ⇒ [cx_d, cy_d, width_d, height_d]
-    ・outtput
+    ・output
     　　⇒ bboxes: バウンディングボックスの情報(tensor([8732,4])) ⇒ (xmin,ymin,xmax,ymax)
     """
 
@@ -208,6 +208,64 @@ def decode(loc, dbox_list):
     boxes[:, 2:] += boxes[:, :2]  # (xmin, ymin)にw,hをそれぞれ足して(xmax, ymax)を算出
 
     return boxes  # (xmin,ymin,xmax,ymax) ⇒ tensor(8732,4)
+
+
+def non_maximun_supression(boxes, scores, overlap=0.45, top_k=200):
+    """
+    non_maximun_supression
+    　⇒ 1つの画像に対してBboxが何個も重なってしまうことが発生する。その中でも信頼度(confidence)が高いもののみを選択する手法
+    　　 Bboxが被っているもの(overlap>0.45)を削除する
+
+    ・input
+    　⇒ boxes：bbox情報
+    　⇒ score：信頼度情報(confidence)
+    ・output
+    　⇒ count：nms後の残ったBboxの個数
+    　⇒ keep：nms後に残ったBboxのindex番号のリスト
+    """
+
+    # returnのひな型を作成する
+    count = 0
+    keep = (
+        scores.new(scores.size(0)).zero_().long()
+    )  # score(tensor型)と同じTensorを作成する(要素はすべて0であり、long()で整数)
+
+    # 各Bboxの面積areaを求める。
+    x1 = boxes[:, 0]  # xmin
+    y1 = boxes[:, 1]  # ymin
+    x2 = boxes[:, 2]  # xmax
+    y2 = boxes[:, 3]  # ymax
+    area = torch.mul(x2 - x1, y2 - y1)  # Bboxの面積(縦*横)
+
+    # boxesをコピーする
+    tmp_x1 = boxes.new()
+    tmp_y1 = boxes.new()
+    tmp_x2 = boxes.new()
+    tmp_y2 = boxes.new()
+    tmp_w = boxes.new()
+    tmp_h = boxes.new()
+
+    v, idx = scores.sort(
+        0, descending=True
+    )  # 降順に並べ替える ⇒ v: 並び替えた後のtensor、idx: どう並べ替えたのかの情報
+    idx = idx[:top_k]  # 上位〇番目までをピックアップ
+
+    while idx.numel() > 0:  # idxの要素数が0(Bboxが存在しない)場合はループしない
+        i = idx[0]  # confの最大index
+        keep[count] = i  # keepに最大confのBboxを入れる
+        count += 1
+
+        if idx.size(0) == 1:  # 最後のBboxの場合はループを抜ける
+            break
+
+        idx = idx[1:]  # confが最大のものは除去(keepに入っているため)
+
+        # keepに格納したBboxと被りが大きいものを抽出して削除する
+        # 1つ減らしたidxまでのBboxを選択(outに選択されたBboxが入る)
+        torch.index_select(x1, 0, idx, out=tmp_x1)
+        torch.index_select(y1, 0, idx, out=tmp_y1)
+        torch.index_select(x2, 0, idx, out=tmp_x2)
+        torch.index_select(y2, 0, idx, out=tmp_y2)
 
 
 def main_run():
@@ -257,7 +315,7 @@ def main_run():
     dbox = DefaultBox(cfg_ssd)
     dbox_list = dbox.generate_dbox_list()
     ssd = SSD(phase="train", cfg=cfg_ssd)
-    print(dbox_list, dbox_list[:, :2], dbox_list[:, 2:])
+    aa = dbox_list.new()
 
 
 if __name__ == "__main__":
