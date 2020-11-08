@@ -250,3 +250,45 @@ class Detect(torch.autograd.Function):
                     (scores[ids[:count]].unsqueeze(1), boxes[ids[:count]]), 1
                 )
         return output  # tensor([1, 21, 200, 5]) ⇒ 1枚毎のBbox情報(non_maximum_supression済)
+
+
+class MultiBoxLoss(nn.Module):
+    """
+    ssdの損失関数を算出するクラス
+    """
+
+    def __init__(self, jaccard_threshold=0.5, neg_pos=3, device="cpu"):
+        super(MultiBoxLoss, self).__init__()
+        self.jaccard_threshold = jaccard_threshold  # jaccard係数の閾値
+        self.neg_pos = neg_pos  # Hard Negative Mining の負と正の比率(ex 3 ⇒ neg:pos=3:1)
+        self.device = device  # cpu or gpu
+
+    def forward(self, predictions, targets):
+        """
+        損失関数の計算
+        ・input
+            ⇒ predictions：ssdの訓練時の出力(output：(loc,conf,dbox_list))
+            ⇒ target：正解データ([num_batch, num_objects, 5]) ⇒ 5は(xmin,ymin,xmax.ymax,label_index)
+        ・output
+            ⇒ loss_l：locの損失関数
+            ⇒ loss_c：confの損失関数
+        """
+
+        # ssdモデルの出力をばらす
+        loc, conf, dbox_list = predictions
+
+        # 要素数を把握
+        num_batch = loc.size(0)
+        num_dbox = loc.size(1)
+        num_classes = conf.size(2)
+
+        # 損失計算に使用するものを格納する変数を作成
+        # conf_t_label：各Dboxに近い、正解のBboxのラベルを格納する
+        # loc_t：各Dboxに近い、正解のBboxの位置を格納する
+        conf_t_label = torch.LongTensor(num_batch, num_dbox).to(
+            self.device
+        )  # LongTensor: 64bitの符号付き整数
+        loc_t = torch.Tensor(num_batch, num_dbox, 4).to(self.device)
+
+        for idx in range(num_batch):
+            ...
