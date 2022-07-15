@@ -40,7 +40,7 @@ DateTime==4.3
 decorator==4.4.2
 defusedxml==0.6.0
 deprecation==2.1.0
-distributed==2.13.0
+distributed==2021.10.0
 docutils==0.15.2
 efficientnet-pytorch==0.6.3
 entrypoints==0.3
