@@ -179,7 +179,7 @@ tbb==2020.0.133
 tblib==1.6.0
 tensorboard==2.1.1
 tensorboardX==2.0
-tensorflow-cpu==2.1.0
+tensorflow-cpu==2.9.3
 tensorflow-estimator==2.1.0
 termcolor==1.1.0
 terminado==0.8.3
