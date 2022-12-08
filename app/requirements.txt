@@ -17,7 +17,7 @@ catalogue==1.0.0
 catalyst==20.4.2
 catboost==0.20.2
 category-encoders==2.2.2
-certifi==2019.11.28
+certifi==2022.12.7
 chardet==3.0.4
 chart-studio==1.1.0
 click==7.1.1
